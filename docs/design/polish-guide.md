@@ -77,6 +77,11 @@
 - **回弹只给位移和缩放**，透明度永远不越过 1；回弹量用 `AppMotion` 里的弹簧，不手写。跟手之后的落位用 `AppMotion.settle` 接住手指速度。
 - **两档都要成立**：新效果先判断 `AppMotion.fluid(context)`，标准档走原来的路径；树结构两档保持一致，切换时子树状态不丢。
 - **效果都有对应的省电手段**：防跳帧时钟（`FrameClock`）让卡顿后的动画接着走而不是跳到半路；被盖住的页面移动时画快照（`_Recede`），玻璃不用每帧重新采样。
+- **渲染与帧预算守卫（目标 `< 8.333ms`）**：
+  - **遮挡即静默**：侧栏拉开（`drawer.value > 0`）或模态弹层覆盖（`!ModalRoute.of(context).isCurrent`）时，被遮挡页面必须经 `GlassBackdropScope` 暂停背景模糊采样与不可见循环 Ticker（`WhaleTail`、`StatusDot`、`ThinkGlyph`、`PetSprite`、`LiveElapsed`），但不得用顶层 `TickerMode(enabled: false)` 误伤 `PetStage` 的桌面悬浮窗推送。
+  - **零幽灵 Ticker**：隐藏态（如 `opacity == 0` 或 `Offstage`）严禁保留 `StatusTone.busy` 等循环 `AnimationController.repeat()`；所有循环动效节点必须各自包裹 `RepaintBoundary`，防止脏区扩散至外层 `BackdropFilter`。
+  - **`BackdropGroup` 与实底遮罩**：同组 `BackdropFilter.grouped` 滤镜参数必须完全一致（禁用按组件坐标变化的 `bounded: true`，否则 Impeller 无法合并模糊 Pass，见 Flutter #191207）；已由实心 `TopFade` / `BackdropVeil` 遮挡滚动正文且无自定义壁纸图片的常驻浮层，保持半透明 `fill` 与高光描边即可，不叠加无意义的每帧离屏 `BackdropFilter`。顶栏与底栏不得跨全屏共用同一个 `BackdropGroup`。
+  - **纹理缓存与零空转离屏层**：无 RasterCache 的后端（如 Impeller OpenGLES）上，静态全屏背景渐变、遮罩条带与 `GlassTier.sheet`/`chrome` 外投影使用 `SnapshotWidget` 缓存并在路由遮挡时释放纹理；`ScrollEdgeFade` 等滚动边缘渐隐在未滚出边界时必须保持 `alwaysNeedsCompositing = false`，不挂载空转 `ShaderMaskLayer`。
 - 聊天列表不回弹：回弹不发 `OverscrollNotification`，`OverscrollForwarder` 依赖它。
 
 现有效果：按压光晕（`AppInkGlow`，`rowSplash`）、松手回弹（`Pressable`）、对话框弹出（`showAppDialog`，新对话框都走它）、卡片展开成页面（`CardOrigin`，`FeatureCard` / `OverviewCard` 已接）、深浅色从手指处揭开（`ThemeRevealHost`）、气泡从输入框升起（`StreamFadeIn.rise`）、列表回弹（`AppMotion.scrollPhysics`）、分段滑块回弹、长按抬起（`HoldLift`）、对勾一笔画出（`DrawnCheck`）、数字滚动（`RollingCount`）、发送键飞出、列表弹性入场（`FadeSlideIn`）、抽屉视差（只平移，不缩放）。

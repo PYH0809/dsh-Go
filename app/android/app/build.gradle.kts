@@ -34,6 +34,8 @@ fun buildMinuteVersionCode(): Int {
     return (t.year - 2026) * 100_000_000 + t.monthValue * 1_000_000 + t.dayOfMonth * 10_000 + t.hour * 100 + t.minute
 }
 
+val appIdOverride = (project.findProperty("dshApplicationId") as String?)?.trim()?.takeIf { it.isNotEmpty() }
+
 android {
     namespace = "io.github.ccch1mneyyy.dsh_app"
     compileSdk = flutter.compileSdkVersion
@@ -45,7 +47,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "io.github.ccch1mneyyy.dsh_app"
+        applicationId = appIdOverride ?: "io.github.pyh0809.dsh_app"
         // java.nio.file (symlinks while unpacking the rootfs) needs API 26.
         minSdk = 26
         // Target 28 like Termux, so the API 29+ exec restriction on app-private
