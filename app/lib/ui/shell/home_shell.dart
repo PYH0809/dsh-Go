@@ -415,6 +415,7 @@ class _HomeShellState extends ConsumerState<HomeShell> with TickerProviderStateM
                                 onOpen: _openDestination,
                                 identityBarHeight: _identityBar,
                                 drawerMotion: _drawer,
+                                fixedWidth: width,
                               ),
                               onClose: _closeDrawer,
                             ),

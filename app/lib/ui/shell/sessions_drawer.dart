@@ -87,6 +87,7 @@ class SessionsDrawer extends ConsumerWidget {
     this.now,
     this.identityBarHeight,
     this.drawerMotion,
+    this.fixedWidth,
   });
 
   final VoidCallback onClose;
@@ -105,6 +106,11 @@ class SessionsDrawer extends ConsumerWidget {
   /// glass surface re-samples the whole chat behind it every frame, which is
   /// the expensive part on mid-range GPUs.
   final Animation<double>? drawerMotion;
+
+  /// Fixed outer width when known by the shell (e.g. pulled-over drawer),
+  /// avoiding a `LayoutBuilder` in the brand row whose `BuildScope` schedules
+  /// a layout callback when ancestor `Visibility` toggles on Flutter 3.47.7.
+  final double? fixedWidth;
 
   /// Where the content sits in from either edge: the search bar, the rows'
   /// highlights and the identity bar's keys.
@@ -138,6 +144,9 @@ class SessionsDrawer extends ConsumerWidget {
     // A phone on its side: the top of the drawer (brand, search, filters)
     // would leave room for two conversations, so it scrolls away with them.
     final short = MediaQuery.sizeOf(context).height < WindowClass.compactHeight;
+    final availableNewChatWidth = fixedWidth == null
+        ? null
+        : fixedWidth! - MediaQuery.paddingOf(context).left - 20 - 10 - (36 + 8 + 36 + 8);
     final top = <Widget>[
       RepaintBoundary(
         child: AnimatedSwitcher(
@@ -150,28 +159,45 @@ class SessionsDrawer extends ConsumerWidget {
                   // button's edge with the search bar's and the rows'
                   // edges (10).
                   padding: const EdgeInsets.fromLTRB(20, 14, 10, 10),
-                  child: LayoutBuilder(
-                    builder: (context, box) => Row(
-                      children: [
-                        // On a narrow drawer with large text the lockup gives
-                        // way a little rather than the keys.
-                        const Expanded(
-                          child: Align(
-                            alignment: AlignmentDirectional.centerStart,
-                            child: FittedBox(fit: BoxFit.scaleDown, child: BrandLockup(height: 19)),
+                  child: availableNewChatWidth != null
+                      ? Row(
+                          children: [
+                            const Expanded(
+                              child: Align(
+                                alignment: AlignmentDirectional.centerStart,
+                                child: FittedBox(fit: BoxFit.scaleDown, child: BrandLockup(height: 19)),
+                              ),
+                            ),
+                            const ModeKey(),
+                            const SizedBox(width: 8),
+                            const WebModeKey(tier: GlassTier.pill),
+                            const SizedBox(width: 8),
+                            NewChatButton(
+                              onTap: newChat,
+                              compact: NewChatButton.widthOf(context) > availableNewChatWidth,
+                            ),
+                          ],
+                        )
+                      : LayoutBuilder(
+                          builder: (context, box) => Row(
+                            children: [
+                              const Expanded(
+                                child: Align(
+                                  alignment: AlignmentDirectional.centerStart,
+                                  child: FittedBox(fit: BoxFit.scaleDown, child: BrandLockup(height: 19)),
+                                ),
+                              ),
+                              const ModeKey(),
+                              const SizedBox(width: 8),
+                              const WebModeKey(tier: GlassTier.pill),
+                              const SizedBox(width: 8),
+                              NewChatButton(
+                                onTap: newChat,
+                                compact: NewChatButton.widthOf(context) > box.maxWidth - (36 + 8 + 36 + 8),
+                              ),
+                            ],
                           ),
                         ),
-                        // 模式 and 网页模式, quietly: the one solid element stays 新对话.
-                        const ModeKey(),
-                        const SizedBox(width: 8),
-                        const WebModeKey(tier: GlassTier.pill),
-                        const SizedBox(width: 8),
-                        // When even the lockup's room is not enough, 新对话
-                        // keeps its glyph and lets its words go.
-                        _NewChatResponsiveButton(onTap: newChat, availableWidth: box.maxWidth - (36 + 8 + 36 + 8)),
-                      ],
-                    ),
-                  ),
                 ),
         ),
       ),
@@ -1135,17 +1161,4 @@ class _ClearSelectionWhenHidden extends ConsumerWidget {
     }
     return const SizedBox.shrink();
   }
-}
-
-class _NewChatResponsiveButton extends StatelessWidget {
-  const _NewChatResponsiveButton({required this.onTap, required this.availableWidth});
-
-  final VoidCallback onTap;
-  final double availableWidth;
-
-  @override
-  Widget build(BuildContext context) => NewChatButton(
-    onTap: onTap,
-    compact: NewChatButton.widthOf(context) > availableWidth,
-  );
 }
