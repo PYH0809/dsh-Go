@@ -2,7 +2,8 @@
 <!-- Long-press on the launcher icon: 新对话 and 语音输入 (static), then up to three recent
      conversations (dynamic, shortcuts/ShortcutsPlugin.kt). All go through the non-exported
      shortcuts/EntryActivity; launchers start shortcuts as this app, so it needs no export.
-     targetPackage is the applicationId (no build-type suffix today; add one and this breaks). -->
+     targetPackage must match defaultConfig.applicationId in app/build.gradle.kts (Android XML
+     resources do not expand ${applicationId}; launcher_icon_geometry_test.dart enforces parity). -->
 <shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
     <shortcut
         android:shortcutId="new_chat"
