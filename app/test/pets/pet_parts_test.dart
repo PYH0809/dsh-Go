@@ -312,6 +312,16 @@ void main() {
       expect(c.read(petPrefsProvider).packId, noPetId);
       expect(find.text('安静模式'), findsNothing);
       expect(find.byType(PetPreview), findsNWidgets(3));
+
+      // 「进度条鲸尾」 stays visible even when pet is set to 「不显示」, defaults
+      // to true, and can be manually turned off!
+      expect(c.read(petPrefsProvider).whaleTail, isTrue);
+      final whaleSwitch = find.byKey(const ValueKey('pet-whale-tail'));
+      await tester.ensureVisible(whaleSwitch);
+      await tester.tap(whaleSwitch);
+      await tester.pump();
+      expect(c.read(petPrefsProvider).whaleTail, isFalse);
+      expect(c.read(petPrefsProvider).whaleTailExplicit, isTrue);
     });
   });
 }

@@ -5534,6 +5534,18 @@ abstract class L10n {
   /// **'只做动作，不冒气泡'**
   String get botsPetQuietSubtitle;
 
+  /// No description provided for @botsPetWhaleTail.
+  ///
+  /// In zh, this message translates to:
+  /// **'进度条鲸尾'**
+  String get botsPetWhaleTail;
+
+  /// No description provided for @botsPetWhaleTailSubtitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'生成中在胶囊条左端游动；关闭可连同不显示宠物一起降低直播耗电'**
+  String get botsPetWhaleTailSubtitle;
+
   /// No description provided for @botsPetShowNow.
   ///
   /// In zh, this message translates to:
@@ -29521,6 +29533,12 @@ abstract class L10n {
   /// In zh, this message translates to:
   /// **'安静,宠物安静'**
   String get searchKwPetQuiet;
+
+  /// No description provided for @searchKwPetWhaleTail.
+  ///
+  /// In zh, this message translates to:
+  /// **'鲸尾,金鱼尾巴,鱼尾,隐藏鲸尾,状态条尾巴,胶囊尾巴,省电,功耗'**
+  String get searchKwPetWhaleTail;
 
   /// No description provided for @searchKwPetOutside.
   ///

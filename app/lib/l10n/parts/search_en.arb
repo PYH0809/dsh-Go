@@ -60,6 +60,7 @@
   "searchKwAppIcon": "launcher icon,icon",
   "searchKwPetSize": "pet size",
   "searchKwPetQuiet": "quiet,pet quiet",
+  "searchKwPetWhaleTail": "whale tail,fish tail,hide whale tail,status bar tail,battery,power",
   "searchKwPetOutside": "overlay,floating pet,outside app",
   "searchKwPetDisplayWhen": "pet display,when to show",
   "searchKwPetOverlayShows": "floating companion,room companion,pixel pet,live2d",

@@ -830,6 +830,8 @@
   "botsPetSize": "大小",
   "botsPetQuiet": "安静模式",
   "botsPetQuietSubtitle": "只做动作，不冒气泡",
+  "botsPetWhaleTail": "进度条鲸尾",
+  "botsPetWhaleTailSubtitle": "生成中在胶囊条左端游动；关闭可连同不显示宠物一起降低直播耗电",
   "botsPetShowNow": "立即显示",
   "botsPetHiddenUntil": "藏到 {time}",
   "@botsPetHiddenUntil": {

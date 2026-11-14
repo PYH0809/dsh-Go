@@ -773,6 +773,12 @@ abstract final class Spots {
     title: (l) => l.botsPetQuiet,
     keywords: (l) => l.searchKwPetQuiet,
   );
+  static final petWhaleTail = SettingSpot(
+    'pet-whale-tail',
+    page: SettingsPageId.pets,
+    title: (l) => l.botsPetWhaleTail,
+    keywords: (l) => l.searchKwPetWhaleTail,
+  );
   static final petOutsideApp = SettingSpot(
     'pet-outside-app',
     page: SettingsPageId.pets,
@@ -1116,6 +1122,7 @@ final _rows = <SettingSpot>[
   Spots.wallpaper,
   Spots.petSize,
   Spots.petQuiet,
+  Spots.petWhaleTail,
   Spots.petOutsideApp,
   Spots.petDisplayWhen,
   Spots.petOverlayShows,

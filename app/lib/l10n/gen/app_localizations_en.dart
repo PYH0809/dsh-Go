@@ -3168,6 +3168,13 @@ class L10nEn extends L10n {
   String get botsPetQuietSubtitle => 'Animations only, no bubbles';
 
   @override
+  String get botsPetWhaleTail => 'Status bar whale tail';
+
+  @override
+  String get botsPetWhaleTailSubtitle =>
+      'Swims on the left of the status pill while generating; turn off with no pet to save power';
+
+  @override
   String get botsPetShowNow => 'Show now';
 
   @override
@@ -16980,6 +16987,9 @@ class L10nEn extends L10n {
 
   @override
   String get searchKwPetQuiet => 'quiet,pet quiet';
+
+  @override
+  String get searchKwPetWhaleTail => 'whale tail,fish tail,hide whale tail,status bar tail,battery,power';
 
   @override
   String get searchKwPetOutside => 'overlay,floating pet,outside app';

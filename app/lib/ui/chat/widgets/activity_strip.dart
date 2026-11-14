@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../l10n/l10n.dart';
+import '../../../pets/pet_prefs.dart';
 import '../../../state/chat_state.dart';
 import '../../../state/run_pulse.dart';
 import '../../pets/pet_perch.dart';
@@ -99,6 +100,7 @@ class _ActivityStripSlotState extends ConsumerState<ActivityStripSlot> with Sing
     final sessionId = widget.sessionId;
     final activity = ref.watch(chatProvider(sessionId).select(runActivityOf));
     final pulse = ref.watch(runPulseProvider(sessionId));
+    final whaleTailEnabled = ref.watch(petPrefsProvider.select((p) => p.whaleTail));
     return ListenableBuilder(
       listenable: pulse,
       builder: (context, _) {
@@ -131,7 +133,7 @@ class _ActivityStripSlotState extends ConsumerState<ActivityStripSlot> with Sing
                   tokensPerSecond: () => pulse.tokensPerSecond,
                   onTap: shown == null ? null : widget.onTap,
                   todoProgress: widget.todoProgress,
-                  whale: occupied != PerchKind.strip,
+                  whale: whaleTailEnabled && occupied != PerchKind.strip,
                 ),
               ),
             ),
