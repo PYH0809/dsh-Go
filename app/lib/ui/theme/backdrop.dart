@@ -5,6 +5,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/scheduler.dart';
 
 import 'backdrop_frame.dart';
 import 'surfaces.dart';
@@ -308,9 +309,19 @@ class _RenderVeilBandLayout extends RenderShiftedBox {
     markNeedsLayout();
   }
 
+  bool _postFrameScheduled = false;
+
   void _scheduleMarkNeedsLayout() {
     if (!attached) return;
-    if (owner?.debugDoingLayout ?? false) return;
+    if (SchedulerBinding.instance.schedulerPhase == SchedulerPhase.persistentCallbacks) {
+      if (_postFrameScheduled) return;
+      _postFrameScheduled = true;
+      SchedulerBinding.instance.addPostFrameCallback((_) {
+        _postFrameScheduled = false;
+        if (attached) markNeedsLayout();
+      });
+      return;
+    }
     markNeedsLayout();
   }
 

@@ -411,7 +411,17 @@ class _RenderShadowStack extends RenderBox {
   double? computeDistanceToActualBaseline(TextBaseline baseline) => _child?.getDistanceToActualBaseline(baseline);
 
   @override
+  double? computeDryBaseline(covariant BoxConstraints constraints, TextBaseline baseline) =>
+      _child?.getDryBaseline(constraints, baseline);
+
+  @override
   Size computeDryLayout(BoxConstraints constraints) => _child?.getDryLayout(constraints) ?? constraints.smallest;
+
+  @override
+  void applyPaintTransform(RenderBox child, Matrix4 transform) {
+    final offset = (child.parentData! as BoxParentData).offset;
+    transform.translateByDouble(offset.dx, offset.dy, 0, 1);
+  }
 
   @override
   void performLayout() {
