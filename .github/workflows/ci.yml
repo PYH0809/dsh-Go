@@ -181,6 +181,7 @@ jobs:
             test/chat/dock/dock_stack_test.dart; do
             [ -f "$f" ] && targets+=("$f")
           done
+          [ ${#targets[@]} -eq 0 ] && { echo "No matching guard tests, skipping."; exit 0; }
           flutter test --no-pub --enable-impeller "${targets[@]}"
       - name: Keep golden diffs
         if: failure()

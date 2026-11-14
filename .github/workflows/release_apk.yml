@@ -92,19 +92,30 @@ jobs:
           key: ${{ steps.runtime-cache.outputs.cache-primary-key }}
 
       - name: Write release signing key
+        env:
+          SIGN_KEYSTORE_BASE64: ${{ secrets.SIGN_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
-          if [ -z "${{ secrets.SIGN_KEYSTORE_BASE64 }}" ]; then
+          if [ -z "$SIGN_KEYSTORE_BASE64" ]; then
             echo "::error::SIGN_KEYSTORE_BASE64 is not set; release builds must be signed."
             exit 1
           fi
           umask 077
-          echo "${{ secrets.SIGN_KEYSTORE_BASE64 }}" | base64 --decode > app/android/app/release.jks
-          cat > app/android/key.properties <<EOF
-          storeFile=release.jks
-          storePassword=${{ secrets.KEYSTORE_PASSWORD }}
-          keyAlias=${{ secrets.KEY_ALIAS }}
-          keyPassword=${{ secrets.KEY_PASSWORD }}
-          EOF
+          printf '%s' "$SIGN_KEYSTORE_BASE64" | base64 --decode > app/android/app/release.jks
+          python3 - <<'PY'
+          import os, pathlib
+          def esc(s: str) -> str:
+              return s.replace('\\', '\\\\').replace('\n', '\\n').replace('\r', '\\r')
+          lines = [
+              'storeFile=release.jks',
+              f"storePassword={esc(os.environ['KEYSTORE_PASSWORD'])}",
+              f"keyAlias={esc(os.environ['KEY_ALIAS'])}",
+              f"keyPassword={esc(os.environ['KEY_PASSWORD'])}",
+          ]
+          pathlib.Path('app/android/key.properties').write_text('\n'.join(lines) + '\n', encoding='utf-8')
+          PY
 
       - name: Install Android NDK for libtawcroot.so and build signed arm64 APK
         id: build
