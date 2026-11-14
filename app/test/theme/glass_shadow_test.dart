@@ -231,12 +231,12 @@ void main() {
             return _pixels(tester);
           }
 
-          // The unchanged card path uses the same supplied material and shape,
-          // but still paints the shadow directly, without a separate cache layer.
+          // Small circular buttons draw directly without allocating per-button
+          // shadow textures; superellipse and stadium panels cache their shadow.
           final uncached = await render(GlassTier.card);
           expect(_shadowBoundary, findsNothing);
           final cached = await render(tier);
-          expect(_shadowBoundary, findsOneWidget);
+          expect(_shadowBoundary, shape == 'circle' ? findsNothing : findsOneWidget);
           expect(cached, orderedEquals(uncached), reason: 'cache bounds must not crop or move the original shadow');
           int alpha(int x, int y) => cached[(y * 360 + x) * 4 + 3];
           expect(alpha(180, 255), greaterThan(0), reason: 'soft shadow still paints below the 250px shape bottom');

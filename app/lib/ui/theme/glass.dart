@@ -212,10 +212,12 @@ class GlassSurface extends StatelessWidget {
     }
 
     if (s.shadows.isNotEmpty) {
-      if (tier == GlassTier.sheet || tier == GlassTier.chrome) {
-        // Cache only the static shadow, not the live glass/content. Impeller
-        // does not raster-cache a RepaintBoundary on all backends. Include the
-        // outer shadow in the snapshot's size so the image cannot cut it off.
+      if ((tier == GlassTier.sheet || tier == GlassTier.chrome) && !circle) {
+        // Cache only the static shadow on rectangular/pill chrome & sheet panels
+        // (small 44dp circular buttons draw directly via CustomPaint to avoid
+        // per-button texture overhead). Impeller does not raster-cache a
+        // RepaintBoundary on all backends. Include the outer shadow in the
+        // snapshot's size so the image cannot cut it off.
         final extent = _GlassShadowPainter.extentOf(s.shadows);
         content = _ShadowStack(
           extent: extent,

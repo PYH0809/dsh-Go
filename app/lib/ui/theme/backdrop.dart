@@ -361,42 +361,13 @@ class _CachedBandVeil extends StatefulWidget {
 
 class _CachedBandVeilState extends State<_CachedBandVeil> {
   final _controller = SnapshotController(allowSnapshotting: true);
-  late double _lastHeight = widget.solidHeight.value;
-  bool _changing = false;
-  int _generation = 0;
-
-  @override
-  void initState() {
-    super.initState();
-    widget.solidHeight.addListener(_onHeightChanged);
-  }
 
   void _sync() {
-    final active = !_changing && TickerMode.valuesOf(context).enabled;
+    final active = TickerMode.valuesOf(context).enabled;
     if (_controller.allowSnapshotting != active) {
       _controller.allowSnapshotting = active;
       if (!active) _controller.clear();
     }
-  }
-
-  void _onHeightChanged() {
-    final next = widget.solidHeight.value;
-    if (next == _lastHeight) return;
-    _lastHeight = next;
-    _changing = true;
-    final gen = ++_generation;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || gen != _generation) return;
-      if (_controller.allowSnapshotting) {
-        _controller.allowSnapshotting = false;
-        _controller.clear();
-      }
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted || gen != _generation) return;
-        _changing = false;
-        _sync();
-      });
-    });
   }
 
   @override
@@ -408,11 +379,6 @@ class _CachedBandVeilState extends State<_CachedBandVeil> {
   @override
   void didUpdateWidget(_CachedBandVeil oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (!identical(oldWidget.solidHeight, widget.solidHeight)) {
-      oldWidget.solidHeight.removeListener(_onHeightChanged);
-      widget.solidHeight.addListener(_onHeightChanged);
-      _lastHeight = widget.solidHeight.value;
-    }
     if (widget.painter.shouldRepaint(oldWidget.painter)) {
       _controller.clear();
     }
@@ -421,7 +387,6 @@ class _CachedBandVeilState extends State<_CachedBandVeil> {
 
   @override
   void dispose() {
-    widget.solidHeight.removeListener(_onHeightChanged);
     _controller.dispose();
     super.dispose();
   }
