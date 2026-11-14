@@ -11,11 +11,15 @@ import '../../diagnostics/diagnostics_publish.dart';
 import '../../runtime/runtime_bridge.dart';
 import '../../runtime/runtime_state.dart';
 import '../../share_code/guest_fs.dart';
+import '../../state/chat_state.dart';
+import '../../state/connection_state.dart';
 import '../../state/engine_control.dart';
 import '../../state/hosts_state.dart';
 import '../../state/notify_state.dart';
 import '../../state/onboarding_state.dart';
+import '../../state/sessions_state.dart';
 import '../../state/settings_state.dart';
+import '../../state/ui_mode_state.dart';
 import '../../ui_config/ui_skill.dart';
 import '../onboarding/onboarding_flow.dart';
 import '../onboarding/setup_progress.dart';
@@ -282,9 +286,21 @@ class _RootGateState extends ConsumerState<RootGate> {
     final settings = ref.watch(settingsProvider);
     final runtime = ref.watch(localRuntimeProvider.select((s) => (status: s.status, loaded: s.loaded)));
     final prefs = ref.watch(onboardingPrefsProvider);
-    // The last host comes back while the splash shows, so a phone without
-    // the runtime doesn't open on 本机 for a frame before its remote host.
-    ref.read(activeHostProvider);
+    // The last host, UI mode and session selection come back while the splash
+    // shows, and a restored remote host starts connecting in parallel with the
+    // Keystore / local-runtime probes instead of waiting behind them.
+    final activeHost = ref.watch(activeHostProvider);
+    final uiMode = ref.watch(uiModeProvider);
+    final initialSession = ref.watch(currentSessionProvider);
+    if (!activeHost.isLocal && (!uiMode.loaded || !uiMode.web)) {
+      final serverReady = activeHost.kind != HostKind.relay || (ref.watch(relayServerReadyProvider).value ?? false);
+      if (serverReady && (!_decided || _step == null)) {
+        ref.watch(activeConnectionProvider);
+        if (uiMode.loaded && !uiMode.web && initialSession != null) {
+          ref.watch(chatProvider(initialSession).select((_) => true));
+        }
+      }
+    }
 
     // "重置运行环境" sends the user back through setup; 「卸载运行环境」
     // (localDeclined) stays home.

@@ -20,6 +20,7 @@ import '../state.dart';
 import '../transport/peer_connection.dart';
 import '../transport/relay_transport.dart';
 import '../transport/transport.dart';
+import '../transport/transport_upgrader.dart';
 import '../transport/webrtc_transport.dart';
 import '../util/bytes.dart';
 import 'secret_store.dart';
@@ -378,6 +379,7 @@ class RemoteAccount {
     this.preferredTransports,
     this.onDirectFallback,
     this.compactHistory = false,
+    this.relayFirstUpgrade = false,
     this.directTimeout = const Duration(seconds: 8),
     this.iceServersTimeout = const Duration(seconds: 10),
   }) : serverUrl = normalizeServerUrl(serverUrl ?? defaultRemoteServer),
@@ -423,6 +425,11 @@ class RemoteAccount {
   /// an unsupported Host stays full even if it gains support on reconnect.
   bool compactHistory;
 
+  /// Starts sessions immediately on the Relay data plane (zero ICE/DTLS wait)
+  /// and climbs in the background to TURN -> P2P -> LAN when the Host supports
+  /// `remote.transport.upgrade.v1`.
+  bool relayFirstUpgrade;
+
   /// How long a direct attempt may take to open its DataChannel before the
   /// next path is tried (the Server's larger deadline is capped at 15 s).
   final Duration directTimeout;
@@ -448,6 +455,7 @@ class RemoteAccount {
   final Map<String, DateTime> _directCooldown = {};
   final Map<String, DateTime> _turnCooldown = {};
   final Map<String, String> _networkHints = {};
+  final Set<String> _legacyNoUpgradeHosts = {};
   final StreamController<RemoteConnectionState> _connectionStates = StreamController.broadcast();
 
   String get _identityKey => 'dsh_remote.v1.$_scope.identity';
@@ -1058,31 +1066,52 @@ class RemoteAccount {
     return Future.wait(
       listings.map((listing) async {
         final peer = await _withToken((token) => api.device(token, listing.deviceId));
-        final pin = pins[listing.deviceId];
-        final key = peer.role == 'host' && identityKeyPattern.hasMatch(peer.identityKey) ? peer.identityKey : null;
-        final trust = key == null
-            ? RemoteHostTrust.unknown
-            : pin == null
-            ? RemoteHostTrust.unpinned
-            : pin.identityKey == key
-            ? RemoteHostTrust.pinned
-            : RemoteHostTrust.keyChanged;
-        return RemoteHost(
-          id: listing.deviceId,
-          name: listing.name,
-          platform: listing.platform,
-          online: peer.online ?? listing.online,
-          trust: trust,
-          harnessVersion: listing.harnessVersion ?? peer.harnessVersion,
-          pluginVersion: listing.clientVersion ?? peer.clientVersion,
-          lastSeenAt: peer.lastSeenAt ?? listing.lastSeenAt,
-          identityKey: key,
-          pinnedIdentityKey: pin?.identityKey,
-          membershipId: listing.membershipId,
-        );
+        return _remoteHostFromPeer(peer, pins[listing.deviceId], listing: listing);
       }),
     );
   });
+
+  /// Resolves one target Host without reading descriptors for unrelated Hosts
+  /// on the account; returns null when [hostId] is gone or not a Host.
+  Future<RemoteHost?> lookupHost(String hostId) => _guard(() async {
+    if (hostId.isEmpty) return null;
+    final AuthorizedPeer peer;
+    try {
+      peer = await _withToken((token) => api.device(token, hostId));
+    } on RemoteApiException catch (error) {
+      if (error.status == 404 || error.code == 'DEVICE_NOT_FOUND' || error.code == 'HOST_NOT_FOUND') {
+        return null;
+      }
+      rethrow;
+    }
+    if (peer.role != 'host' || peer.deviceId != hostId) return null;
+    final pins = await _loadPins();
+    return _remoteHostFromPeer(peer, pins[hostId]);
+  });
+
+  static RemoteHost _remoteHostFromPeer(AuthorizedPeer peer, _Pin? pin, {ServerHostListing? listing}) {
+    final key = peer.role == 'host' && identityKeyPattern.hasMatch(peer.identityKey) ? peer.identityKey : null;
+    final trust = key == null
+        ? RemoteHostTrust.unknown
+        : pin == null
+        ? RemoteHostTrust.unpinned
+        : pin.identityKey == key
+        ? RemoteHostTrust.pinned
+        : RemoteHostTrust.keyChanged;
+    return RemoteHost(
+      id: listing?.deviceId ?? peer.deviceId,
+      name: listing?.name ?? peer.name,
+      platform: listing?.platform ?? peer.platform,
+      online: peer.online ?? listing?.online ?? false,
+      trust: trust,
+      harnessVersion: listing?.harnessVersion ?? peer.harnessVersion,
+      pluginVersion: listing?.clientVersion ?? peer.clientVersion,
+      lastSeenAt: peer.lastSeenAt ?? listing?.lastSeenAt,
+      identityKey: key,
+      pinnedIdentityKey: pin?.identityKey,
+      membershipId: listing?.membershipId ?? peer.membershipId,
+    );
+  }
 
   /// Forgets a Host's pinned key, so the next connect trusts (or prompts
   /// for) the key the Server reports. Use after a legitimate Host reinstall.
@@ -1177,7 +1206,7 @@ class RemoteAccount {
     late final RemoteTunnelCarrier carrier;
     carrier = RemoteTunnelCarrier(
       hostId: host.id,
-      open: (last) => _openHostSession(host, last, confirmNewHost, historyMode, () => carrier.isClosed),
+      open: (last) => _openHostSession(host, last, confirmNewHost, historyMode, () => carrier.isClosed, carrier.refreshTransportState),
       healthInterval: healthInterval,
       healthTimeout: healthTimeout,
       tracer: tracer,
@@ -1226,9 +1255,10 @@ class RemoteAccount {
     HostTrustPrompt? confirm,
     _HistoryMode historyMode,
     bool Function() isCancelled,
+    void Function() onTransportUpgraded,
   ) async {
     try {
-      return await _openHostSessionOnce(host, previous, confirm, historyMode, isCancelled);
+      return await _openHostSessionOnce(host, previous, confirm, historyMode, isCancelled, onTransportUpgraded);
     } on RemoteConnectException {
       rethrow;
     } on Object catch (error) {
@@ -1242,6 +1272,7 @@ class RemoteAccount {
     HostTrustPrompt? confirm,
     _HistoryMode historyMode,
     bool Function() isCancelled,
+    void Function() onTransportUpgraded,
   ) async {
     final identity = _identity;
     if (identity == null || _credentials == null) {
@@ -1375,19 +1406,58 @@ class RemoteAccount {
       }
       historyMode.negotiated = compact;
       setup.stop();
-      RemoteNetworkDiagnostics snapshot() => RemoteNetworkDiagnostics(
-        transportMode: transport is WebRtcTransport ? transport.actualMode : transport.mode,
-        connectionDuration: setup.elapsed,
-        roundTripTime: transport is WebRtcTransport ? transport.roundTripTime : null,
-        peerNetwork: transport is WebRtcTransport ? transport.peerNetwork : null,
-        fallbackReason:
-            selection.fallbackReason ??
-            (transport is WebRtcTransport && transport.actualMode == null
-                ? RemoteNetworkFallbackReason.pathUnverified
-                : null),
-        observedAt: DateTime.now(),
-      );
-      return RemoteHostSession(
+      LiveTransportUpgrader? upgrader;
+      RemoteNetworkDiagnostics snapshot() {
+        final upgraded = upgrader?.currentTransport;
+        if (upgraded != null) {
+          return RemoteNetworkDiagnostics(
+            transportMode: upgraded.mode,
+            connectionDuration: setup.elapsed,
+            roundTripTime: upgraded.roundTripTime,
+            peerNetwork: upgraded.peerNetwork,
+            fallbackReason: null,
+            observedAt: DateTime.now(),
+          );
+        }
+        return RemoteNetworkDiagnostics(
+          transportMode: transport is WebRtcTransport ? transport.actualMode : transport.mode,
+          connectionDuration: setup.elapsed,
+          roundTripTime: transport is WebRtcTransport ? transport.roundTripTime : null,
+          peerNetwork: transport is WebRtcTransport ? transport.peerNetwork : null,
+          fallbackReason:
+              selection.fallbackReason ??
+              (transport is WebRtcTransport && transport.actualMode == null
+                  ? RemoteNetworkFallbackReason.pathUnverified
+                  : null),
+          observedAt: DateTime.now(),
+        );
+      }
+      late final RemoteHostSession hostSession;
+      final connector = peerConnector;
+      if (capabilities.contains(transportUpgradeCapability)) {
+        _legacyNoUpgradeHosts.remove(host.id);
+      } else {
+        _legacyNoUpgradeHosts.add(host.id);
+      }
+      if (relayFirstUpgrade &&
+          connector != null &&
+          transport.mode == RemoteTransportMode.relay &&
+          capabilities.contains(transportUpgradeCapability)) {
+        upgrader = LiveTransportUpgrader(
+          info: transport.info,
+          channel: channel,
+          rpc: rpc,
+          connector: connector,
+          fetchIceServers: (id) async => api.turnCredentials(await accessToken(), id),
+          negotiateTimeout: directTimeout,
+          onUpgraded: (upgraded) {
+            hostSession.transport = upgraded.mode.name;
+            hostSession.networkDiagnostics = snapshot();
+            onTransportUpgraded();
+          },
+        );
+      }
+      hostSession = RemoteHostSession(
         rpc: rpc,
         // api.device was fetched and pin-checked for this exact opening.
         // Do not fall back to host.harnessVersion (a stale listing).
@@ -1397,10 +1467,27 @@ class RemoteAccount {
         transport: transport.mode.name,
         networkDiagnostics: snapshot(),
         inspectNetwork: () async {
-          if (transport is WebRtcTransport) await transport.inspectNetwork();
-          return snapshot();
+          final upgraded = upgrader?.currentTransport;
+          if (upgraded != null) {
+            await upgraded.inspectNetwork();
+          } else if (transport is WebRtcTransport) {
+            await transport.inspectNetwork();
+          }
+          final fresh = snapshot();
+          hostSession.networkDiagnostics = fresh;
+          return fresh;
         },
+        promoteTransport: upgrader == null ? null : ({bool preferLan = false}) => upgrader!.promote(preferLan: preferLan),
       );
+      if (upgrader != null) {
+        // Let the initial follow snapshot start over Relay first, then climb
+        // to TURN -> P2P -> LAN in the background without blocking startup.
+        final expectLan = (_networkHints[host.id] ?? '').contains('lan');
+        Timer(const Duration(milliseconds: 400), () {
+          if (!hostSession.isClosed) unawaited(upgrader!.promote(preferLan: expectLan));
+        });
+      }
+      return hostSession;
     } on RemoteRpcException catch (error) {
       await rpc.close();
       if (probingCapabilities && error.code == 'METHOD_NOT_FOUND') {
@@ -1459,7 +1546,7 @@ class RemoteAccount {
     // must not suppress a fresh lookup on the separately authorized TURN stage.
     Future<List<RemoteIceServer>> fetchIce(String id) => api.turnCredentials(token, id);
 
-    if (!wantDirect && !wantTurn) {
+    if ((relayFirstUpgrade && !_legacyNoUpgradeHosts.contains(hostId)) || (!wantDirect && !wantTurn)) {
       return _TransportSelection(await _connectRelay(token, hostId, isCancelled: isCancelled), reason);
     }
     var control = await _connectRelay(token, hostId, direct: true, preferred: preferred, isCancelled: isCancelled);

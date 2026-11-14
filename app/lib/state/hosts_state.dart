@@ -373,12 +373,16 @@ final activeHostProvider = NotifierProvider<ActiveHostController, HostRef>(Activ
 class RelayServerController extends Notifier<String?> {
   static const prefsKey = 'remote_relay_server';
   bool _touched = false;
+  late Future<void> _loaded;
 
   @override
   String? build() {
-    unawaited(_restore());
+    _loaded = _restore();
     return null;
   }
+
+  /// Completes once the saved relay origin (if any) has been read back.
+  Future<void> get ready => _loaded;
 
   Future<void> _restore() async {
     try {
@@ -464,6 +468,15 @@ class _RelayServerActions {
 const defaultRelayServer = 'https://dsh.r2049.cn';
 
 final relayServerProvider = NotifierProvider<RelayServerController, String?>(RelayServerController.new);
+
+/// Completes once [relayServerProvider] has read its stored origin, so early
+/// launch pre-warming never connects to the default server before a self-hosted
+/// origin is restored.
+final relayServerReadyProvider = FutureProvider<bool>((ref) async {
+  ref.watch(relayServerProvider);
+  await ref.read(relayServerProvider.notifier).ready;
+  return true;
+});
 
 /// The relay client (`packages/dsh_remote`) for the chosen server. Tests
 /// override with a fake; [UnavailableRelayBackend] turns the native relay off.

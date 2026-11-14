@@ -146,6 +146,7 @@ class RemoteHostSession {
     this.transport = 'relay',
     this.networkDiagnostics,
     this.inspectNetwork,
+    this.promoteTransport,
   });
 
   final RemoteRpcClient rpc;
@@ -158,12 +159,13 @@ class RemoteHostSession {
 
   /// Fresh authorized descriptor for this connection, never a cached listing.
   final String? harnessVersion;
-  final String transport;
+  String transport;
 
   /// Initial payload-free snapshot; [inspectNetwork] refreshes native stats
   /// on demand without sending a health probe or starting a polling timer.
-  final RemoteNetworkDiagnostics? networkDiagnostics;
+  RemoteNetworkDiagnostics? networkDiagnostics;
   final Future<RemoteNetworkDiagnostics> Function()? inspectNetwork;
+  final Future<bool> Function({bool preferLan})? promoteTransport;
 
   bool get supportsTransfer => capabilities.contains('harness.remote.transfer.v1');
   bool get supportsStreamTransfer => capabilities.contains('harness.remote.stream.transfer.v1');
@@ -314,15 +316,19 @@ class RemoteTunnelCarrier extends DshCarrier implements WorkspaceUploadCarrier {
     if (phase != RemoteConnectionPhase.connected && phase != RemoteConnectionPhase.closed) {
       failure = _lastFailure ?? _failureFromError(mux.lastError);
     }
+    final nextTransport = phase == RemoteConnectionPhase.connected ? (_session?.transport ?? 'relay') : null;
     final previous = _state;
-    if (previous != null && previous.phase == phase && previous.failure?.code == failure?.code) {
+    if (previous != null &&
+        previous.phase == phase &&
+        previous.failure?.code == failure?.code &&
+        previous.transport == nextTransport) {
       return;
     }
     final next = RemoteConnectionState(
       phase,
       hostId: hostId,
       failure: failure,
-      transport: phase == RemoteConnectionPhase.connected ? (_session?.transport ?? 'relay') : null,
+      transport: nextTransport,
       at: DateTime.now(),
     );
     _state = next;
@@ -395,6 +401,11 @@ class RemoteTunnelCarrier extends DshCarrier implements WorkspaceUploadCarrier {
     });
   }
 
+  /// Publishes a live transport change (e.g. Relay -> P2P -> LAN) to [states].
+  void refreshTransportState() {
+    if (_mux case final mux?) _deriveState(mux);
+  }
+
   /// Checks an established tunnel now; simultaneous checks share one RPC.
   Future<bool> probe({Duration? timeout}) {
     final session = _session;
@@ -419,20 +430,25 @@ class RemoteTunnelCarrier extends DshCarrier implements WorkspaceUploadCarrier {
   /// to take the connection back).
   void reconnect() {
     _lastFailure = null;
+    final session = _session;
+    if (session != null) _detachSession(session);
     final mux = _mux;
     if (mux != null) {
       mux.reconnect();
-    } else {
-      final session = _session;
-      if (session != null) unawaited(_closeSession(session));
+    } else if (session != null) {
+      unawaited(session.close());
     }
   }
 
-  Future<void> _closeSession(RemoteHostSession session) async {
+  void _detachSession(RemoteHostSession session) {
     if (_session == session) {
       _session = null;
       _health?.cancel();
     }
+  }
+
+  Future<void> _closeSession(RemoteHostSession session) async {
+    _detachSession(session);
     await session.close();
   }
 
@@ -1008,9 +1024,10 @@ class _TunnelLink implements DshMuxLink {
   Future<void> close(int code, String reason) async {
     if (_closed) return;
     _closed = true;
+    // Detach synchronously so an immediate mux.openLink() opens a fresh session
+    // instead of reusing this closing one while _events.cancel() yields.
+    _carrier._detachSession(_session);
     await _events?.cancel();
-    // A link the mux abandons (ready timeout, $events closed, reconnect(),
-    // client close) takes its connection with it; the next link is fresh.
-    await _carrier._closeSession(_session);
+    await _session.close();
   }
 }

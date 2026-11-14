@@ -694,6 +694,9 @@ class FakeHostConnection {
   /// WebRTC answer to the client's offer; ciphertext uses it once the client
   /// selected `lan` / `p2p` / `turn`.
   FakeHostPeer? rtc;
+  bool upgradedRtc = false;
+  FakeHostPeer? candidateRtc;
+  String? candidateAttemptId;
   String? selectedTransport;
   bool get viaRtc => rtc != null && selectedTransport != null && selectedTransport != 'relay';
   final RtcChunkCodec rtcIn = RtcChunkCodec();
@@ -708,7 +711,18 @@ class FakeHostConnection {
   void send(RemoteMessage message) {
     for (final fragment in outgoing.encode(message.encode())) {
       if (viaRtc) {
-        rtcOut.encode(noise.encrypt(fragment)).forEach(rtc!.send);
+        final counter = noise.sendingCounter;
+        final enc = noise.encrypt(fragment);
+        if (upgradedRtc) {
+          final framed = Uint8List(12 + enc.length)..setAll(0, [0x44, 0x53, 0x48, 0x55]);
+          ByteData.sublistView(framed, 0, 12)
+            ..setUint32(4, (counter >> 32) & 0xffffffff)
+            ..setUint32(8, counter & 0xffffffff);
+          framed.setRange(12, framed.length, enc);
+          rtcOut.encode(framed).forEach(rtc!.send);
+        } else {
+          rtcOut.encode(enc).forEach(rtc!.send);
+        }
         continue;
       }
       final counter = noise.sendingCounter;
@@ -989,10 +1003,15 @@ class FakeRemoteHost {
     }
   }
 
-  Future<void> _receiveRtc(FakeHostConnection connection, Uint8List data) async {
-    if (!connection.viaRtc) throw StateError('ciphertext on a DataChannel the client did not select');
-    final ciphertext = connection.rtcIn.decode(data);
+  Future<void> _receiveRtc(FakeHostConnection connection, Uint8List data, {bool allowCandidate = false}) async {
+    if (!connection.viaRtc && !allowCandidate) {
+      throw StateError('ciphertext on a DataChannel the client did not select');
+    }
+    var ciphertext = connection.rtcIn.decode(data);
     if (ciphertext == null) return;
+    if (allowCandidate || connection.upgradedRtc) {
+      ciphertext = Uint8List.sublistView(ciphertext, 12);
+    }
     final plain = connection.incoming.decode(connection.noise.decrypt(ciphertext));
     if (plain == null) return;
     await _onMessage(connection, RemoteMessage.decode(plain));
@@ -1099,6 +1118,47 @@ class FakeRemoteHost {
         final upload = workspaceUpload;
         if (upload == null) return reject('FEATURE_NOT_SUPPORTED', 'No workspace upload handler.');
         respond(await upload(method, params));
+      case 'remote.transport.upgrade.offer':
+        if (!capabilities.contains('remote.transport.upgrade.v1') || rtcNetwork == null) {
+          return reject('FEATURE_NOT_SUPPORTED', 'Upgrade unsupported.');
+        }
+        final attemptId = params['attemptId']! as String;
+        connection.candidateRtc?.close();
+        final rtc = rtcNetwork!.answer(
+          params['sdp']! as String,
+          onMessage: (data) => unawaited(_receiveRtc(connection, data, allowCandidate: true)),
+        );
+        if (rtc == null) return reject('INVALID_MESSAGE', 'Unknown offer.');
+        connection.candidateAttemptId = attemptId;
+        connection.candidateRtc = rtc;
+        respond({'attemptId': attemptId, 'sdp': rtcAnswerSdp});
+        connection.event('remote.transport.upgrade.ice', {
+          'attemptId': attemptId,
+          'candidate': {'candidate': 'candidate:2 1 udp 2122260223 192.168.1.30 40000 typ host', 'sdpMid': '0'},
+        });
+      case 'remote.transport.upgrade.ice':
+        respond({'ok': true});
+      case 'remote.transport.upgrade.activate':
+        final attemptId = params['attemptId']! as String;
+        final transport = params['transport']! as String;
+        if (connection.candidateAttemptId != attemptId || connection.candidateRtc == null) {
+          return reject('INVALID_MESSAGE', 'No matching candidate.');
+        }
+        final prev = connection.rtc;
+        connection.rtc = connection.candidateRtc;
+        connection.candidateRtc = null;
+        connection.candidateAttemptId = null;
+        connection.selectedTransport = transport;
+        connection.upgradedRtc = true;
+        respond({'activated': true, 'mode': transport.toUpperCase()});
+        if (prev != null) {
+          Timer(const Duration(milliseconds: 200), prev.close);
+        }
+      case 'remote.transport.upgrade.abort':
+        connection.candidateRtc?.close();
+        connection.candidateRtc = null;
+        connection.candidateAttemptId = null;
+        respond({'ok': true});
       case 'harness.remote.call':
         final endpoint = params['endpoint']! as String;
         if (!harnessRemoteAllowlist.contains(endpoint)) {

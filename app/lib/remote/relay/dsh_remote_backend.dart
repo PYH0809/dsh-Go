@@ -19,7 +19,7 @@ import 'network_route.dart';
 ///
 /// [direct] (直连优先) lets connections try LAN / P2P / TURN over
 /// [peerConnector] (flutter_webrtc) before the Server's relay.
-class DshRemoteRelayBackend implements RelayBackend, RelayNetworkBackend, RelayPairingBackend {
+class DshRemoteRelayBackend implements RelayBackend, RelayTargetHostBackend, RelayNetworkBackend, RelayPairingBackend {
   DshRemoteRelayBackend({
     required SecretStore secrets,
     Object? serverUrl,
@@ -38,6 +38,7 @@ class DshRemoteRelayBackend implements RelayBackend, RelayNetworkBackend, RelayP
              deviceName: 'DSH App (Android)',
              platform: 'dsh-app-android',
              clientVersion: clientVersion,
+             relayFirstUpgrade: direct,
              onDirectFallback: (_) => debugPrint('[dsh-remote] automatic transport fallback'),
            ) {
     this.direct = direct;
@@ -56,13 +57,16 @@ class DshRemoteRelayBackend implements RelayBackend, RelayNetworkBackend, RelayP
   RemoteNetworkRoute _networkRoute = RemoteNetworkRoute.unknown;
   final _sessionRoutes = Expando<RemoteNetworkRoute>('remote route');
   final _networkProbes = Expando<Future<bool>>('remote network probe');
-  final _loggedSessions = Expando<bool>('logged remote network');
+  final _loggedSessions = Expando<String>('logged remote network');
 
   /// The WebRTC stack [direct] connections use.
   final remote.RemotePeerConnector? peerConnector;
 
   /// Applies from the next (re)connect.
-  set direct(bool enabled) => account.peerConnector = enabled ? peerConnector : null;
+  set direct(bool enabled) {
+    account.peerConnector = enabled ? peerConnector : null;
+    account.relayFirstUpgrade = enabled && peerConnector != null;
+  }
 
   /// Applies to the next client, without disturbing live streams or its reconnects.
   set compactHistory(bool enabled) => account.compactHistory = enabled;
@@ -158,6 +162,17 @@ class DshRemoteRelayBackend implements RelayBackend, RelayNetworkBackend, RelayP
   });
 
   @override
+  Future<RelayHost?> lookupHost(String hostId) => _map(() async {
+    final host = await account.lookupHost(hostId);
+    if (host == null) {
+      _hosts.remove(hostId);
+      return null;
+    }
+    _hosts[hostId] = host;
+    return _host(host);
+  });
+
+  @override
   void approveHost(RelayHost host) {
     final fp = host.fingerprint;
     if (fp != null) _approved[host.id] = fp;
@@ -193,11 +208,25 @@ class DshRemoteRelayBackend implements RelayBackend, RelayNetworkBackend, RelayP
     final next = await _resolveNetworkRoute();
     if (carrier.session != session || session.isClosed) return true;
     if (next != RemoteNetworkRoute.unknown) _sessionRoutes[session] = next;
+    // Moving from cellular to Wi-Fi/LAN while the control tunnel is still
+    // healthy promotes the live session upward to LAN in-place when supported,
+    // avoiding a disruptive teardown; if the control tunnel died on the old
+    // interface, carrier.probe() immediately triggers reconnect.
     if (shouldRenegotiateRemoteRoute(previous, next)) {
+      if (next == RemoteNetworkRoute.local && session.promoteTransport != null) {
+        final alive = await carrier.probe(timeout: const Duration(seconds: 3));
+        if (!alive) return false;
+        unawaited(session.promoteTransport!(preferLan: true));
+        return true;
+      }
       carrier.reconnect();
       return false;
     }
-    return carrier.probe();
+    final alive = await carrier.probe();
+    if (alive && session.promoteTransport != null && session.transport != 'lan') {
+      unawaited(session.promoteTransport!(preferLan: next == RemoteNetworkRoute.local));
+    }
+    return alive;
   }
 
   @override
@@ -221,8 +250,9 @@ class DshRemoteRelayBackend implements RelayBackend, RelayNetworkBackend, RelayP
     final snapshot = session?.networkDiagnostics;
     if (session == null || session.isClosed || snapshot == null) return null;
     final value = _network(snapshot);
-    if (_loggedSessions[session] != true) {
-      _loggedSessions[session] = true;
+    final pathKey = value.path?.name ?? 'unknown';
+    if (_loggedSessions[session] != pathKey) {
+      _loggedSessions[session] = pathKey;
       _logNetwork(value);
     }
     return value;
@@ -282,10 +312,8 @@ class DshRemoteRelayBackend implements RelayBackend, RelayNetworkBackend, RelayP
   @override
   Future<DshClient> connectHost(RelayHost host, {RelayStateCallback? onState}) => _map(() async {
     var target = _hosts[host.id];
-    if (target == null) {
-      await listHosts();
-      target = _hosts[host.id];
-    }
+    target ??= await account.lookupHost(host.id);
+    if (target != null) _hosts[host.id] = target;
     if (target == null) {
       throw HostLinkError(HostLinkErrorKind.notLoggedIn, appL10n.remoteErrHostNotInAccount);
     }

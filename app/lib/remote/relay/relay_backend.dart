@@ -163,6 +163,11 @@ abstract class RelayBackend {
   Future<DshClient> connectHost(RelayHost host, {RelayStateCallback? onState});
 }
 
+/// Optional single-host lookup so startup/reconnect does not read unrelated Host descriptors.
+abstract interface class RelayTargetHostBackend {
+  Future<RelayHost?> lookupHost(String hostId);
+}
+
 /// Optional real network observations, without expanding the account/backend contract.
 abstract interface class RelayNetworkBackend {
   RemoteNetworkStatus? networkOf(DshClient client);

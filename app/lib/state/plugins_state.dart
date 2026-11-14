@@ -15,7 +15,9 @@ import '../share_code/share_net.dart';
 import '../update/version.dart';
 import '../usage/usage_stats.dart';
 import 'app_info.dart';
+import 'chat_state.dart' show chatProvider;
 import 'connection_state.dart';
+import 'sessions_state.dart' show currentSessionProvider;
 import 'market_sidecar.dart';
 
 export 'market_sidecar.dart';

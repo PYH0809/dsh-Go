@@ -20,6 +20,7 @@ import '../state/hosts_state.dart';
 import '../state/notify_state.dart' show FlagController, appForegroundProvider, chatOnScreenProvider;
 import '../state/run_pulse.dart';
 import '../state/session_attention_state.dart';
+import '../state/session_list_reads.dart';
 import '../ui/chat/run_info.dart';
 import 'overlay_channel.dart' show petOverlayChannelProvider;
 import 'pet_mood.dart';
@@ -368,7 +369,7 @@ class _HostRuns {
     _statusDuringList.clear();
     _infoDuringList.clear();
     try {
-      final list = await client.listSessions();
+      final list = await readSharedSessionList(client);
       if (_disposed || readyEpoch != _readyEpoch) return;
       // Merge the snapshot only for fields untouched by newer stream edges.
       // Tombstones stay in the sets until this request finishes, so a removal

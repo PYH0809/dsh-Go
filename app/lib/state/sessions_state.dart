@@ -13,6 +13,7 @@ import 'connection_state.dart';
 import 'hosts_state.dart';
 import 'read_list_cache.dart';
 import 'read_list_identity.dart';
+import 'session_list_reads.dart';
 import 'settings_state.dart';
 import 'workspaces_state.dart';
 
@@ -281,7 +282,7 @@ class SessionsController extends AsyncNotifier<List<SessionSummary>> {
     final List<SessionSummary> sessions;
     _listsOut++;
     try {
-      sessions = await client.listSessions();
+      sessions = await readSharedSessionList(client);
     } finally {
       _listsOut--;
     }

@@ -205,6 +205,9 @@ final hostLinkProvider = Provider.autoDispose.family<HostLink?, HostRef>((ref, h
         // Fresh presence straight from the server (the account list on the
         // remote page refreshes on its own).
         resolveHost: () async {
+          if (backend case final RelayTargetHostBackend targetBackend) {
+            return targetBackend.lookupHost(host.id);
+          }
           final hosts = await backend.listHosts(refresh: true);
           for (final h in hosts) {
             if (h.id == host.id) return h;
