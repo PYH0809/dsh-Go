@@ -10,6 +10,8 @@ import 'package:dsh_app/performance/performance_state.dart';
 import 'package:dsh_app/pets/pet_sheets.dart';
 import 'package:dsh_app/state/locale_state.dart';
 import 'package:dsh_app/ui/chat/empty_actions.dart' show tipStart;
+import 'package:dsh_app/ui/common/scroll_edge_fade.dart' show ScrollEdgeFade;
+import 'package:dsh_app/ui/theme/theme.dart' show AppBackdrop, GlassSurface;
 import 'package:dsh_app/ui_config/ui_config_state.dart';
 
 import 'support/english_preview.dart';
@@ -18,6 +20,11 @@ import 'support/test_fonts.dart';
 
 Future<void> testExecutable(FutureOr<void> Function() testMain) async {
   await loadTestFonts();
+  // SnapshotWidget intermediate 8-bit textures introduce ±1 LSB rounding against
+  // existing vector goldens; dedicated cache tests opt into true explicitly.
+  AppBackdrop.snapshotCaching = false;
+  GlassSurface.shadowCaching = false;
+  ScrollEdgeFade.skipLayerAtRest = false;
   // The chat page's pet is drawn only where a test asks for it
   // (test/pets/): elsewhere a sheet decoding in a stray real-async window
   // would make screens flicker between with and without a pet.
