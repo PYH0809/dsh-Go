@@ -84,8 +84,18 @@ class _ContentPainter extends CustomPainter {
   bool shouldRepaint(_ContentPainter old) => old.frame != frame;
 }
 
+Future<void> _withRealShadows(Future<void> Function() body) async {
+  final old = debugDisableShadows;
+  debugDisableShadows = false;
+  try {
+    await body();
+  } finally {
+    debugDisableShadows = old;
+  }
+}
+
 void main() {
-  testWidgets('a static gradient retains one texture while content and ink stay live', (tester) async {
+  testWidgets('a static gradient retains one texture while content and ink stay live', (tester) => _withRealShadows(() async {
     final images = _watchImages();
     final paints = <int>[];
     var taps = 0;
@@ -118,9 +128,9 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
     expect(image.debugDisposed, isTrue);
     expect(tester.takeException(), isNull);
-  });
+  }));
 
-  testWidgets('opaque full-screen routes release covered gradient textures and restore on pop', (tester) async {
+  testWidgets('opaque full-screen routes release covered gradient textures and restore on pop', (tester) => _withRealShadows(() async {
     final images = _watchImages();
     await tester.pumpWidget(
       MaterialApp(
@@ -143,7 +153,7 @@ void main() {
     expect(images, hasLength(2), reason: 'revealed route recaptures its gradient texture');
     expect(images.last.debugDisposed, isFalse);
     expect(tester.takeException(), isNull);
-  });
+  }));
 
   testWidgets('ScrollEdgeFade omits ShaderMaskLayer at rest and fades accurately at non-zero offset', (tester) async {
     final key = GlobalKey();
@@ -203,7 +213,7 @@ void main() {
     expect(mid[((120 + 99) * 100 + 50) * 4 + 3], lessThan(40), reason: 'bottom edge faded at non-zero y=120 offset');
   });
 
-  testWidgets('theme colors, each glow, glow visibility, size and DPR invalidate the gradient', (tester) async {
+  testWidgets('theme colors, each glow, glow visibility, size and DPR invalidate the gradient', (tester) => _withRealShadows(() async {
     final images = _watchImages();
     var theme = buildLightTheme();
     var glow = true;
@@ -252,9 +262,9 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
     expect(current.debugDisposed, isTrue);
     expect(tester.takeException(), isNull);
-  });
+  }));
 
-  testWidgets('picture crossfades and fading back to the gradient are never cached', (tester) async {
+  testWidgets('picture crossfades and fading back to the gradient are never cached', (tester) => _withRealShadows(() async {
     final red = _solid(const Color(0xffff0000));
     final blue = _solid(const Color(0xff0000ff));
     addTearDown(red.dispose);
@@ -311,11 +321,11 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
     expect(replacement.debugDisposed, isTrue);
     expect(tester.takeException(), isNull);
-  });
+  }));
 
   for (final dark in [false, true]) {
     for (final glow in [false, true]) {
-      testWidgets('cached gradient matches all original pixels (dark=$dark, glow=$glow)', (tester) async {
+      testWidgets('cached gradient matches all original pixels (dark=$dark, glow=$glow)', (tester) => _withRealShadows(() async {
         final theme = dark ? buildDarkTheme() : buildLightTheme();
         await tester.pumpWidget(_scene(theme: theme, glow: glow, picture: const BackdropPicture(image: null)));
         expect(_snapshot, findsNothing);
@@ -329,7 +339,7 @@ void main() {
         }
         expect(differentChannels, 0, reason: 'cache the original three gradients without changing their pixels');
         expect(tester.takeException(), isNull);
-      });
+      }));
     }
   }
 }

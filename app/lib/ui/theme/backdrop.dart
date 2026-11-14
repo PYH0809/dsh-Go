@@ -54,7 +54,9 @@ class AppBackdrop extends StatelessWidget {
           Positioned.fill(
             child: IgnorePointer(
               child: RepaintBoundary(
-                child: picture == null ? _CachedGradient(painter: painter) : CustomPaint(painter: painter),
+                child: picture == null && !debugDisableShadows
+                    ? _CachedGradient(painter: painter)
+                    : CustomPaint(painter: painter),
               ),
             ),
           ),
@@ -218,7 +220,9 @@ class BackdropVeil extends StatelessWidget {
         solidHeight: solidHeight,
         feather: feather,
         fromTop: fromTop,
-        child: _CachedBandVeil(painter: bandPainter),
+        child: debugDisableShadows
+            ? CustomPaint(size: Size.infinite, painter: bandPainter)
+            : _CachedBandVeil(painter: bandPainter),
       ),
     );
   }
