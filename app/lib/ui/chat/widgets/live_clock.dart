@@ -5,6 +5,8 @@ import 'dart:async';
 
 import 'package:flutter/widgets.dart';
 
+import '../../theme/glass.dart' show GlassBackdropScope;
+
 /// The wall clock live timers read (tests freeze it).
 DateTime Function() runClock = DateTime.now;
 
@@ -46,8 +48,15 @@ class _LiveElapsedState extends State<LiveElapsed> with WidgetsBindingObserver {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _tickerEnabled = TickerMode.valuesOf(context).enabled;
+    final enabled = TickerMode.valuesOf(context).enabled && GlassBackdropScope.animationsEnabledOf(context);
+    final resumed = !_tickerEnabled && enabled;
+    _tickerEnabled = enabled;
     _schedule();
+    if (resumed && _foreground && widget.since != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _tickerEnabled && _foreground) setState(() {});
+      });
+    }
   }
 
   @override

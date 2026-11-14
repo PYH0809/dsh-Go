@@ -14,15 +14,44 @@ import 'surfaces.dart';
 /// InheritedTheme, this is not captured by sheets opened from inside the scope.
 /// Their glass still follows the user's transparency setting.
 class GlassBackdropScope extends InheritedWidget {
-  const GlassBackdropScope({super.key, required this.enabled, required super.child});
+  const GlassBackdropScope({
+    super.key,
+    required this.enabled,
+    this.translucentWhenDisabled = false,
+    this.animationsEnabled,
+    required super.child,
+  });
 
   final bool enabled;
+
+  /// True when the backdrop behind this scope is already a smooth solid-gradient
+  /// veil (no sharp text or custom picture), so skipping `BackdropFilter` can
+  /// keep the translucent `s.fill` instead of switching to opaque `fallbackFill`.
+  final bool translucentWhenDisabled;
+
+  /// Whether leaf visual tickers (`WhaleTail`, `StatusDot`, `ThinkGlyph`,
+  /// `PetSprite`, `LiveElapsed`) should run inside this scope. Defaults to
+  /// `enabled || translucentWhenDisabled`.
+  final bool? animationsEnabled;
 
   static bool enabledOf(BuildContext context) =>
       context.dependOnInheritedWidgetOfExactType<GlassBackdropScope>()?.enabled ?? true;
 
+  static bool translucentWhenDisabledOf(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<GlassBackdropScope>()?.translucentWhenDisabled ?? false;
+
+  /// True while the surface is uncovered and active.
+  static bool animationsEnabledOf(BuildContext context) {
+    final scope = context.dependOnInheritedWidgetOfExactType<GlassBackdropScope>();
+    if (scope == null) return true;
+    return scope.animationsEnabled ?? (scope.enabled || scope.translucentWhenDisabled);
+  }
+
   @override
-  bool updateShouldNotify(GlassBackdropScope oldWidget) => enabled != oldWidget.enabled;
+  bool updateShouldNotify(GlassBackdropScope oldWidget) =>
+      enabled != oldWidget.enabled ||
+      translucentWhenDisabled != oldWidget.translucentWhenDisabled ||
+      animationsEnabled != oldWidget.animationsEnabled;
 }
 
 /// 玻璃表面:**模糊背后的内容 → 叠半透明填充 → 发丝描边 + 顶边高光 → 外投影**。
@@ -131,13 +160,14 @@ class GlassSurface extends StatelessWidget {
     final s = style ?? surfaces.glass(tier);
     final highContrast = MediaQuery.maybeHighContrastOf(context) ?? false;
     final sampleBackdrop = GlassBackdropScope.enabledOf(context);
+    final keepTranslucent = GlassBackdropScope.translucentWhenDisabledOf(context);
     final reduce = !surfaces.blurEnabled || highContrast || uiTraceNoBlur;
     final useBlur = !reduce && (blur ?? s.blurs);
     if (uiTraceEnabled) {
       uiTrace('glass', 'build', {'tier': tier.name, 'blur': useBlur, 'grouped': grouped});
     }
     final fill = useBlur
-        ? Color.lerp(s.fallbackFill, s.fill, sampleBackdrop ? (settled ?? 1) : 0)!
+        ? Color.lerp(s.fallbackFill, s.fill, (sampleBackdrop || keepTranslucent) ? (settled ?? 1) : 0)!
         : (reduce || s.blurs ? s.fallbackFill : s.fill);
     final shape = _shape;
     final textDirection = Directionality.maybeOf(context);

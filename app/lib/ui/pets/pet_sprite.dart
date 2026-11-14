@@ -13,6 +13,7 @@ import 'package:flutter/widgets.dart';
 import '../../pets/pet_pack.dart';
 import '../../pets/pet_sheets.dart';
 import '../../pets/pet_state.dart';
+import '../theme/glass.dart' show GlassBackdropScope;
 import '../theme/motion.dart';
 
 /// Device pixels per art pixel for [size]: whole numbers, one apart at
@@ -99,6 +100,7 @@ class PetSpriteState extends State<PetSprite> with WidgetsBindingObserver {
   VoidCallback? _pending;
   bool _reduced = false;
   bool _ticking = true;
+  bool _scopeEnabled = true;
   bool _appVisible = true;
   bool _ended = false;
   int _generation = 0;
@@ -137,6 +139,9 @@ class PetSpriteState extends State<PetSprite> with WidgetsBindingObserver {
     super.didChangeDependencies();
     final reduced = AppMotion.reduced(context);
     final ticking = TickerMode.valuesOf(context).enabled;
+    final scopeEnabled = GlassBackdropScope.animationsEnabledOf(context);
+    final wasPaused = _paused;
+    _scopeEnabled = scopeEnabled;
     final first = _shown == null && _generation == 0;
     if (first || reduced != _reduced || ticking != _ticking) {
       _reduced = reduced;
@@ -146,6 +151,8 @@ class PetSpriteState extends State<PetSprite> with WidgetsBindingObserver {
       } else {
         _schedule();
       }
+    } else if (_paused != wasPaused) {
+      _pauseChanged();
     }
   }
 
@@ -201,7 +208,7 @@ class PetSpriteState extends State<PetSprite> with WidgetsBindingObserver {
   }
 
   bool get _still => widget.still || _reduced || !_ticking;
-  bool get _paused => widget.paused || !_appVisible;
+  bool get _paused => widget.paused || !_appVisible || !_scopeEnabled;
 
   void _schedule() {
     _cancelTimer();

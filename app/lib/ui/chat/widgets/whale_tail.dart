@@ -9,6 +9,8 @@ import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
+import '../../theme/glass.dart' show GlassBackdropScope;
+
 /// DeepSeek 官方蓝。浅色玻璃上约 3.9–4.3:1(图形的 3:1 线以上)。
 const deepSeekBlue = Color(0xFF4D6BFE);
 
@@ -134,6 +136,7 @@ class WhaleTailState extends State<WhaleTail> with SingleTickerProviderStateMixi
   final _repaint = ValueNotifier<int>(0);
   WhaleAtlas? _atlas = WhaleSprites.cached;
   bool _reduced = false;
+  bool _ticking = true;
 
   /// 交叉淡变的时长。
   static const _blend = Duration(milliseconds: 320);
@@ -178,6 +181,7 @@ class WhaleTailState extends State<WhaleTail> with SingleTickerProviderStateMixi
   void didChangeDependencies() {
     super.didChangeDependencies();
     _reduced = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
+    _ticking = TickerMode.valuesOf(context).enabled && GlassBackdropScope.animationsEnabledOf(context);
     _sync();
   }
 
@@ -217,13 +221,13 @@ class WhaleTailState extends State<WhaleTail> with SingleTickerProviderStateMixi
 
   /// Ticks whenever it moves (and the sprites are in).
   void _sync() {
-    final moving = _moving && _atlas != null;
+    final moving = _moving && _ticking && _atlas != null;
     if (moving && !_ticker.isActive) {
       _last = Duration.zero;
       _ticker.start();
     } else if (!moving && _ticker.isActive) {
       _ticker.stop();
-      _repaint.value++;
+      if (!_moving) _repaint.value++;
     }
   }
 

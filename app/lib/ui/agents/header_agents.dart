@@ -186,7 +186,7 @@ class HeaderAgentsKey extends StatelessWidget {
               // frames while nothing runs (#1094).
               child: TickerMode(
                 enabled: running,
-                child: const StatusDot(tone: StatusTone.busy, size: 7),
+                child: StatusDot(tone: running ? StatusTone.busy : StatusTone.idle, size: 7),
               ),
             ),
           ),

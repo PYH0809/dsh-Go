@@ -2,6 +2,8 @@
 
 import 'package:flutter/material.dart';
 
+import '../theme/glass.dart' show GlassBackdropScope;
+
 /// 思考的图标:官方 Web 的"原子"(两道交叉轨道 + 中心点),与官方界面一致。
 ///
 /// [spinning] 时轨道慢慢转(思考中),慢到不和标签上的扫光抢眼,只表示还活着;
@@ -25,26 +27,28 @@ class ThinkGlyph extends StatefulWidget {
 class _ThinkGlyphState extends State<ThinkGlyph> with SingleTickerProviderStateMixin {
   AnimationController? _spin;
 
-  void _sync(bool animate) {
+  void _sync() {
+    final animate = widget.spinning && !MediaQuery.disableAnimationsOf(context) && GlassBackdropScope.animationsEnabledOf(context);
     if (animate) {
-      (_spin ??= AnimationController(vsync: this, duration: const Duration(milliseconds: 7200))).repeat();
+      final spin = _spin ??= AnimationController(vsync: this, duration: const Duration(milliseconds: 7200));
+      if (!spin.isAnimating) spin.repeat();
     } else {
       _spin?.stop();
-      _spin?.value = 0;
+      if (!widget.spinning || MediaQuery.disableAnimationsOf(context)) _spin?.value = 0;
     }
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _sync(widget.spinning && !MediaQuery.disableAnimationsOf(context));
+    _sync();
   }
 
   @override
   void didUpdateWidget(ThinkGlyph oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.spinning != widget.spinning) {
-      _sync(widget.spinning && !MediaQuery.disableAnimationsOf(context));
+      _sync();
     }
   }
 

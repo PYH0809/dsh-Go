@@ -951,48 +951,50 @@ class _ChatListState extends ConsumerState<ChatList> with SingleTickerProviderSt
                   onNotification: _onMetrics,
                   child: NotificationListener<ScrollNotification>(
                     onNotification: _onScroll,
-                    child: CustomScrollView(
-                      controller: _scroll,
-                      physics: _physics,
-                      // Material's stretch indicator moves the painted first
-                      // row even while clamping physics holds its pixels.
-                      scrollBehavior: ScrollConfiguration.of(context).copyWith(overscroll: false),
-                      center: _centerKey,
-                      anchor: anchor,
-                      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.manual,
-                      slivers: [
-                        SliverToBoxAdapter(child: SizedBox(height: widget.topInset + AppSpace.sm)),
-                        SliverToBoxAdapter(
-                          key: _historyKey,
-                          child: _HistoryHeader(
-                            loading: s.loadingOlder || (s.loading && rows.isEmpty),
-                            hasMore: s.hasMoreHistory,
+                    child: RepaintBoundary(
+                      child: CustomScrollView(
+                        controller: _scroll,
+                        physics: _physics,
+                        // Material's stretch indicator moves the painted first
+                        // row even while clamping physics holds its pixels.
+                        scrollBehavior: ScrollConfiguration.of(context).copyWith(overscroll: false),
+                        center: _centerKey,
+                        anchor: anchor,
+                        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.manual,
+                        slivers: [
+                          SliverToBoxAdapter(child: SizedBox(height: widget.topInset + AppSpace.sm)),
+                          SliverToBoxAdapter(
+                            key: _historyKey,
+                            child: _HistoryHeader(
+                              loading: s.loadingOlder || (s.loading && rows.isEmpty),
+                              hasMore: s.hasMoreHistory,
+                            ),
                           ),
-                        ),
-                        SliverList(
-                          key: _beforeKey,
-                          delegate: SliverChildBuilderDelegate(
-                            (context, i) => _buildRow(split - 1 - i),
-                            childCount: split,
-                            findChildIndexCallback: (key) {
-                              final i = key is ValueKey<String> ? _index[key.value] : null;
-                              return i == null || i >= split ? null : split - 1 - i;
-                            },
+                          SliverList(
+                            key: _beforeKey,
+                            delegate: SliverChildBuilderDelegate(
+                              (context, i) => _buildRow(split - 1 - i),
+                              childCount: split,
+                              findChildIndexCallback: (key) {
+                                final i = key is ValueKey<String> ? _index[key.value] : null;
+                                return i == null || i >= split ? null : split - 1 - i;
+                              },
+                            ),
                           ),
-                        ),
-                        SliverList(
-                          key: _centerKey,
-                          delegate: SliverChildBuilderDelegate(
-                            (context, i) => _buildRow(split + i),
-                            childCount: rows.length - split,
-                            findChildIndexCallback: (key) {
-                              final i = key is ValueKey<String> ? _index[key.value] : null;
-                              return i == null || i < split ? null : i - split;
-                            },
+                          SliverList(
+                            key: _centerKey,
+                            delegate: SliverChildBuilderDelegate(
+                              (context, i) => _buildRow(split + i),
+                              childCount: rows.length - split,
+                              findChildIndexCallback: (key) {
+                                final i = key is ValueKey<String> ? _index[key.value] : null;
+                                return i == null || i < split ? null : i - split;
+                              },
+                            ),
                           ),
-                        ),
-                        SliverToBoxAdapter(child: SizedBox(height: bottomPad)),
-                      ],
+                          SliverToBoxAdapter(child: SizedBox(height: bottomPad)),
+                        ],
+                      ),
                     ),
                   ),
                 ),
@@ -1006,11 +1008,13 @@ class _ChatListState extends ConsumerState<ChatList> with SingleTickerProviderSt
                 child: ValueListenableBuilder<bool>(
                   valueListenable: _showJump,
                   builder: (context, visible, child) => PetAvoid(active: visible, child: child!),
-                  child: _JumpToBottom(
-                    visible: _showJump,
-                    hasNew: _hasNew,
-                    waiting: s.questions.length + s.approvals.where((a) => !s.autoAnswered.contains(a.eventId)).length,
-                    onTap: jumpToBottom,
+                  child: RepaintBoundary(
+                    child: _JumpToBottom(
+                      visible: _showJump,
+                      hasNew: _hasNew,
+                      waiting: s.questions.length + s.approvals.where((a) => !s.autoAnswered.contains(a.eventId)).length,
+                      onTap: jumpToBottom,
+                    ),
                   ),
                 ),
               ),

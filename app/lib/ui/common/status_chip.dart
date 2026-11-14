@@ -44,12 +44,12 @@ class _AnimatedStatusDotState extends State<AnimatedStatusDot> with SingleTicker
   }
 
   void _sync() {
-    if (widget.tone == StatusTone.busy && !AppMotion.reduced(context)) {
+    final active = GlassBackdropScope.animationsEnabledOf(context);
+    if (widget.tone == StatusTone.busy && !AppMotion.reduced(context) && active) {
       if (!_pulse.isAnimating) _pulse.repeat(reverse: true);
     } else {
-      _pulse
-        ..stop()
-        ..value = 0;
+      _pulse.stop();
+      if (widget.tone != StatusTone.busy || AppMotion.reduced(context)) _pulse.value = 0;
     }
   }
 
@@ -61,15 +61,17 @@ class _AnimatedStatusDotState extends State<AnimatedStatusDot> with SingleTicker
 
   @override
   Widget build(BuildContext context) {
-    return FadeTransition(
-      opacity: _opacity,
-      child: TweenAnimationBuilder<Color?>(
-        tween: ColorTween(end: StatusDot.colorFor(context, widget.tone)),
-        duration: AppMotion.of(context, AppMotion.standard),
-        curve: AppMotion.std,
-        builder: (context, color, _) => DecoratedBox(
-          decoration: ShapeDecoration(color: color, shape: const CircleBorder()),
-          child: SizedBox.square(dimension: widget.size),
+    return RepaintBoundary(
+      child: FadeTransition(
+        opacity: _opacity,
+        child: TweenAnimationBuilder<Color?>(
+          tween: ColorTween(end: StatusDot.colorFor(context, widget.tone)),
+          duration: AppMotion.of(context, AppMotion.standard),
+          curve: AppMotion.std,
+          builder: (context, color, _) => DecoratedBox(
+            decoration: ShapeDecoration(color: color, shape: const CircleBorder()),
+            child: SizedBox.square(dimension: widget.size),
+          ),
         ),
       ),
     );
