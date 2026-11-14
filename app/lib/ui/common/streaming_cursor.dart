@@ -2,7 +2,6 @@
 
 import 'package:flutter/material.dart';
 
-import '../theme/glass.dart';
 import '../theme/motion.dart';
 
 /// 流式输出末尾的呼吸竖线光标。
@@ -37,8 +36,7 @@ class _StreamingCursorState extends State<StreamingCursor> with SingleTickerProv
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    final active = GlassBackdropScope.animationsEnabledOf(context);
-    if (AppMotion.reduced(context) || !active) {
+    if (AppMotion.reduced(context)) {
       _controller
         ..stop()
         ..value = 0;

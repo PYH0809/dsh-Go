@@ -12,7 +12,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../l10n/l10n.dart';
 import '../../notify/chat_alerts.dart' show approvalText, questionText;
-import '../../pets/pet_prefs.dart';
 import '../../runtime/local_footprint.dart' show RuntimeMissing;
 import '../../runtime/runtime_bridge.dart' show RuntimePhase;
 import '../../runtime/runtime_state.dart' show localRuntimeProvider;
@@ -2663,17 +2662,17 @@ class _ChatScaler extends TextScaler {
   int get hashCode => Object.hash(base, factor);
 }
 
-class _RouteInteractionScope extends ConsumerStatefulWidget {
+class _RouteInteractionScope extends StatefulWidget {
   const _RouteInteractionScope({required this.onRouteChanged, required this.child});
 
   final ValueChanged<ModalRoute<Object?>?> onRouteChanged;
   final Widget child;
 
   @override
-  ConsumerState<_RouteInteractionScope> createState() => _RouteInteractionScopeState();
+  State<_RouteInteractionScope> createState() => _RouteInteractionScopeState();
 }
 
-class _RouteInteractionScopeState extends ConsumerState<_RouteInteractionScope> {
+class _RouteInteractionScopeState extends State<_RouteInteractionScope> {
   ModalRoute<Object?>? _route;
 
   @override
@@ -2687,11 +2686,10 @@ class _RouteInteractionScopeState extends ConsumerState<_RouteInteractionScope> 
   Widget build(BuildContext context) {
     final current = _route?.isCurrent ?? true;
     final uncovered = !AppBackdrop.snapshotCaching || current;
-    final mascots = ref.watch(petPrefsProvider.select((p) => p.enabled || p.whaleTail));
     return GlassBackdropScope(
       enabled: GlassBackdropScope.enabledOf(context) && uncovered,
       translucentWhenDisabled: GlassBackdropScope.translucentWhenDisabledOf(context),
-      animationsEnabled: GlassBackdropScope.animationsEnabledOf(context) && uncovered && mascots,
+      animationsEnabled: GlassBackdropScope.animationsEnabledOf(context) && uncovered,
       child: widget.child,
     );
   }

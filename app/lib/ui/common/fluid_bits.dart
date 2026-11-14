@@ -8,7 +8,6 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/physics.dart';
 
-import '../theme/glass.dart';
 import '../theme/motion.dart';
 
 /// Long press with a body: held, the thing sinks a little; when the press lands it
@@ -324,7 +323,7 @@ class _QuietArcState extends State<QuietArc> with SingleTickerProviderStateMixin
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (AppMotion.reduced(context) || !GlassBackdropScope.animationsEnabledOf(context)) {
+    if (AppMotion.reduced(context)) {
       _spin.stop();
     } else if (!_spin.isAnimating) {
       unawaited(_spin.repeat());

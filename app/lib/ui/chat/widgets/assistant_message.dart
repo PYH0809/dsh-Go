@@ -407,30 +407,17 @@ class _StallDotState extends State<_StallDot> with SingleTickerProviderStateMixi
   ).animate(CurvedAnimation(parent: _breath, curve: Curves.easeInOut));
   Timer? _wait;
   bool _shown = false;
-  bool _animationsEnabled = true;
 
   @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    final enabled = GlassBackdropScope.animationsEnabledOf(context);
-    if (_wait == null && !_shown) {
-      _animationsEnabled = enabled;
-      _arm();
-    } else if (_animationsEnabled != enabled) {
-      _animationsEnabled = enabled;
-      _arm();
-    }
+  void initState() {
+    super.initState();
+    _arm();
   }
 
   void _arm() {
     _wait?.cancel();
-    if (!_animationsEnabled) {
-      _breath.stop();
-      if (_shown) setState(() => _shown = false);
-      return;
-    }
     _wait = Timer(_StallDot._after, () {
-      if (!mounted || !_animationsEnabled) return;
+      if (!mounted) return;
       setState(() => _shown = true);
       unawaited(_breath.repeat(reverse: true));
     });

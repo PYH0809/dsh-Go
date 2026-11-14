@@ -58,7 +58,7 @@ class Liquid extends StatefulWidget {
   final double filterPadding;
 
   /// When true (single-item tab indicators like `SegmentedPill`), resting frames
-  /// (`_engine.clean > 0`) draw the crisp anti-aliased vector pill directly
+  /// (`_engine.asleep`) draw the crisp anti-aliased vector pill directly
   /// instead of running the 18x/60x alpha-threshold Gooey `saveLayer` passes
   /// that quantize smooth pill edges into stair-stepped fringes.
   final bool crispWhenStill;
@@ -86,6 +86,7 @@ class _LiquidState extends State<Liquid> with SingleTickerProviderStateMixin {
     if (_engine.clean > 30) {
       _ticker.stop();
       _engine.sleep();
+      _engine.group?.markNeedsPaint();
       return;
     }
     _engine.group?.markNeedsPaint();
@@ -445,13 +446,14 @@ class _RenderLiquid extends RenderProxyBox {
   // Shapes are drawn opaque and the fill's alpha is applied to the layer: the
   // threshold would otherwise turn a translucent fill solid.
   final _shape = Paint();
+  final _crispFill = Paint();
   final _layer = Paint();
   final _isolate = Paint();
-  Color _rawFill = const Color(0xFFFFFFFF);
+  List<(Offset, Paint)>? _crispShadows;
   set fill(Color value) {
     final opaque = value.withValues(alpha: 1);
-    if (opaque == _shape.color && value.a == _layer.color.a && value == _rawFill) return;
-    _rawFill = value;
+    if (opaque == _shape.color && value.a == _layer.color.a && value == _crispFill.color) return;
+    _crispFill.color = value;
     _shape.color = opaque;
     _layer.color = Color.fromRGBO(0, 0, 0, value.a);
     markNeedsPaint();
@@ -467,6 +469,7 @@ class _RenderLiquid extends RenderProxyBox {
 
   void _invalidate() {
     _passes = null;
+    _crispShadows = null;
     markNeedsPaint();
   }
 
@@ -543,7 +546,12 @@ class _RenderLiquid extends RenderProxyBox {
   void paint(PaintingContext context, Offset offset) {
     if (_engine.blobs.isNotEmpty) {
       _engine.step(this, SchedulerBinding.instance.currentFrameTimeStamp);
-      if (_crispWhenStill && (_engine.clean > 0 || _engine.reduced)) {
+      // Draw crisp anti-aliased vector geometry whenever the engine is asleep
+      // (at initial mount before any motion, and once `_LiquidState._tick`
+      // puts the engine back to sleep after 30 clean frames) or animations
+      // are disabled (`reduced`), so mid-drag brief finger pauses never snap
+      // prematurely between Gooey and crisp!
+      if (_crispWhenStill && (_engine.asleep || _engine.reduced)) {
         debugPaintedGooLastFrame = false;
         _paintCrisp(context.canvas, offset);
       } else {
@@ -554,21 +562,34 @@ class _RenderLiquid extends RenderProxyBox {
     super.paint(context, offset);
   }
 
+  List<(Offset, Paint)> _buildCrispShadows() => [
+    for (final s in _shadows.reversed)
+      if (!s.inset)
+        (
+          s.offset,
+          Paint()
+            ..color = s.color
+            ..maskFilter = s.blur > 0 ? MaskFilter.blur(BlurStyle.normal, s.blur / 2) : null,
+        ),
+  ];
+
   void _paintCrisp(Canvas canvas, Offset offset) {
+    final shadows = _crispShadows ??= _buildCrispShadows();
     canvas
       ..save()
       ..translate(offset.dx, offset.dy);
-    for (final s in _shadows.reversed) {
-      if (s.inset) continue;
-      final shadowPaint = Paint()
-        ..color = s.color
-        ..maskFilter = s.blur > 0 ? MaskFilter.blur(BlurStyle.normal, s.blur / 2) : null;
-      canvas.save();
-      if (s.offset != Offset.zero) canvas.translate(s.offset.dx, s.offset.dy);
-      _engine.paint(canvas, shadowPaint);
-      canvas.restore();
+    for (final (shift, shadowPaint) in shadows) {
+      if (shift == Offset.zero) {
+        _engine.paint(canvas, shadowPaint);
+      } else {
+        canvas
+          ..save()
+          ..translate(shift.dx, shift.dy);
+        _engine.paint(canvas, shadowPaint);
+        canvas.restore();
+      }
     }
-    _engine.paint(canvas, Paint()..color = _rawFill);
+    _engine.paint(canvas, _crispFill);
     canvas.restore();
   }
 

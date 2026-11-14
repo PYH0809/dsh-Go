@@ -29,15 +29,10 @@ enum StatusTone {
 /// 颜色**不是唯一信号**:旁边总要配文字("运行中"/"已停止"),
 /// 色弱用户和读屏都靠文字。
 class StatusDot extends StatefulWidget {
-  const StatusDot({super.key, required this.tone, this.size = 8, this.pulse = true});
+  const StatusDot({super.key, required this.tone, this.size = 8});
 
   final StatusTone tone;
   final double size;
-
-  /// Whether [StatusTone.busy] runs its continuous breathing ticker. Turning
-  /// off `桌宠与鲸尾` disables this 90/120Hz dot pulse too so idle waiting
-  /// between model chunks drops to 0 background frames!
-  final bool pulse;
 
   static Color colorFor(BuildContext context, StatusTone tone) {
     final colors = DshColors.of(context);
@@ -78,11 +73,11 @@ class _StatusDotState extends State<StatusDot> with SingleTickerProviderStateMix
 
   void _sync() {
     final active = GlassBackdropScope.animationsEnabledOf(context);
-    if (widget.tone == StatusTone.busy && widget.pulse && !AppMotion.reduced(context) && active) {
+    if (widget.tone == StatusTone.busy && !AppMotion.reduced(context) && active) {
       if (!_pulse.isAnimating) _pulse.repeat(reverse: true);
     } else {
       _pulse.stop();
-      if (widget.tone != StatusTone.busy || !widget.pulse || AppMotion.reduced(context)) _pulse.value = 0;
+      if (widget.tone != StatusTone.busy || AppMotion.reduced(context)) _pulse.value = 0;
     }
   }
 
