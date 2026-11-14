@@ -28,15 +28,19 @@ Future<Uint8List> _pixels(WidgetTester tester) async {
 }
 
 void _expectNoAncestorRepaintBoundary(Iterable<RenderBackdropFilter> filters, {required RenderObject stopAt}) {
-  expect(filters, isNotEmpty);
-  for (final filter in filters) {
+  final active = filters.where((f) => f.enabled).toList();
+  expect(active, isNotEmpty);
+  for (final filter in active) {
     RenderObject? node = filter.parent;
     while (node != null && !identical(node, stopAt)) {
+      final isPlainOffsetBoundary =
+          node is RenderRepaintBoundary ||
+          (node.isRepaintBoundary && node is! RenderOpacity && node is! RenderAnimatedOpacity);
       expect(
-        node,
-        isNot(isA<RenderRepaintBoundary>()),
-        reason: 'RenderBackdropFilter (${filter.debugCreator}) has an ancestor RenderRepaintBoundary '
-            '(${node.debugCreator}), which isolates BackdropFilter into an empty offscreen layer on Impeller OpenGLES',
+        isPlainOffsetBoundary,
+        isFalse,
+        reason: 'Active RenderBackdropFilter (${filter.debugCreator}) has an ancestor repaint boundary '
+            '(${node.debugCreator}), which isolates BackdropFilter on Impeller OpenGLES',
       );
       node = node.parent;
     }

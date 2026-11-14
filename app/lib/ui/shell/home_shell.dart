@@ -6,6 +6,7 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -531,9 +532,6 @@ class _SideParallax extends StatelessWidget {
         final uncovered = !AppBackdrop.snapshotCaching || routeCurrent;
         return AnimatedBuilder(
           animation: Listenable.merge([drawer, quickPanel]),
-          // Never wrap `child` in a RepaintBoundary here: ChatScreen's floating
-          // GlassSurface chrome inside `child` must sample the live backdrop, while
-          // ChatList / rows / veil already own inner RepaintBoundaries.
           child: child,
           builder: (context, child) {
             final panelCovered = drawer.value > 0 || quickPanel.value > 0;
@@ -542,12 +540,19 @@ class _SideParallax extends StatelessWidget {
             // The overlay already suspends its own blur while moving. The
             // underlying chat's floating chrome must also stop sampling while
             // a side panel is open/moving or a modal route covers the shell.
+            // Isolate `child` behind a repaint boundary ONLY while `!active`
+            // (when its BackdropFilters are already disabled); once `active` at
+            // rest, `enabled: false` removes the offscreen boundary without
+            // remounting `child` so `BackdropFilter` samples the live backdrop!
             return GlassBackdropScope(
               enabled: active,
               animationsEnabled: parentAnimations && uncovered && !suspendCovered,
               child: Transform.translate(
                 offset: Offset(fluid ? _share * (drawer.value * drawerWidth - quickPanel.value * quickPanelWidth) : 0, 0),
-                child: child,
+                child: _ConditionalRepaintBoundary(
+                  enabled: !active,
+                  child: child,
+                ),
               ),
             );
           },
@@ -598,11 +603,13 @@ class _DrawerOverlay extends StatelessWidget {
                 fit: StackFit.expand,
                 children: [
                   Positioned.fill(
-                    child: IgnorePointer(
-                      ignoring: progress == 0,
-                      child: GestureDetector(
-                        onTap: onClose,
-                        child: ColoredBox(color: scrim.withValues(alpha: scrim.a * progress)),
+                    child: RepaintBoundary(
+                      child: IgnorePointer(
+                        ignoring: progress == 0,
+                        child: GestureDetector(
+                          onTap: onClose,
+                          child: ColoredBox(color: scrim.withValues(alpha: scrim.a * progress)),
+                        ),
                       ),
                     ),
                   ),
@@ -619,7 +626,10 @@ class _DrawerOverlay extends StatelessWidget {
                       maintainState: true,
                       child: Transform.translate(
                         offset: Offset((progress - 1) * (width + 24) * (fromRight ? -1 : 1), 0),
-                        child: drawer!,
+                        child: _ConditionalRepaintBoundary(
+                          enabled: progress < 1,
+                          child: drawer!,
+                        ),
                       ),
                     ),
                   ),
@@ -631,4 +641,37 @@ class _DrawerOverlay extends StatelessWidget {
       },
     );
   }
+}
+
+/// Acts as a repaint boundary strictly while [enabled] is true (e.g. while a
+/// side panel is translating and its `BackdropFilter` sampling is suspended),
+/// and becomes a pass-through proxy box at rest so active `BackdropFilter`s
+/// never sit inside an ancestor offscreen layer on Impeller OpenGLES.
+class _ConditionalRepaintBoundary extends SingleChildRenderObjectWidget {
+  const _ConditionalRepaintBoundary({required this.enabled, super.child});
+
+  final bool enabled;
+
+  @override
+  RenderObject createRenderObject(BuildContext context) => _RenderConditionalRepaintBoundary(enabled);
+
+  @override
+  void updateRenderObject(BuildContext context, _RenderConditionalRepaintBoundary renderObject) =>
+      renderObject.enabled = enabled;
+}
+
+class _RenderConditionalRepaintBoundary extends RenderProxyBox {
+  _RenderConditionalRepaintBoundary(this._enabled);
+
+  bool _enabled;
+  bool get enabled => _enabled;
+  set enabled(bool value) {
+    if (_enabled == value) return;
+    _enabled = value;
+    markNeedsCompositingBitsUpdate();
+    markNeedsPaint();
+  }
+
+  @override
+  bool get isRepaintBoundary => _enabled;
 }

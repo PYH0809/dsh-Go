@@ -294,10 +294,13 @@ void main() {
     final bottomSheet = tester.renderObject(find.byType(BottomSheet));
     RenderObject? node = filter.parent;
     while (node != null && !identical(node, bottomSheet.parent)) {
+      final isPlainOffsetBoundary =
+          node is RenderRepaintBoundary ||
+          (node.isRepaintBoundary && node is! RenderOpacity && node is! RenderAnimatedOpacity);
       expect(
-        node,
-        isNot(isA<RenderRepaintBoundary>()),
-        reason: 'ancestor RenderRepaintBoundary inside BottomSheet breaks BackdropFilter sampling on Impeller OpenGLES',
+        isPlainOffsetBoundary,
+        isFalse,
+        reason: 'ancestor repaint boundary inside BottomSheet breaks BackdropFilter sampling on Impeller OpenGLES',
       );
       node = node.parent;
     }
