@@ -93,6 +93,9 @@ class _RenderVerticalEdgeMask extends RenderProxyBox {
       return;
     }
     final h = size.height;
+    // Matches Flutter's own `RenderShaderMask.paint` (`proxy_box.dart:1183`):
+    // `ShaderMaskLayer.shader` is evaluated in the maskRect's local `(0, 0)`
+    // origin while `maskRect = offset & size` positions the mask in canvas space.
     _mask.layer = (_mask.layer ?? ShaderMaskLayer())
       ..shader = LinearGradient(
         begin: Alignment.topCenter,

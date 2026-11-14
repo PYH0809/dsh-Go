@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
+import 'package:dsh_app/ui/common/scroll_edge_fade.dart';
 import 'package:dsh_app/ui/theme/theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -142,6 +143,64 @@ void main() {
     expect(images, hasLength(2), reason: 'revealed route recaptures its gradient texture');
     expect(images.last.debugDisposed, isFalse);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('ScrollEdgeFade omits ShaderMaskLayer at rest and fades accurately at non-zero offset', (tester) async {
+    final key = GlobalKey();
+    final controller = ScrollController();
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: RepaintBoundary(
+            key: key,
+            child: Column(
+              children: [
+                const SizedBox(height: 120),
+                SizedBox(
+                  width: 100,
+                  height: 100,
+                  child: ScrollEdgeFade(
+                    topExtent: 20,
+                    bottomExtent: 20,
+                    child: ListView.builder(
+                      controller: controller,
+                      itemCount: 20,
+                      itemExtent: 20,
+                      itemBuilder: (_, _) => const ColoredBox(color: Color(0xFFFF0000)),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    // At top (extentBefore == 0, extentAfter > 0) at canvas y=120:
+    Future<Uint8List> capture() async {
+      final boundary = tester.renderObject<RenderRepaintBoundary>(find.byKey(key));
+      return (await tester.runAsync(() async {
+        final img = await boundary.toImage(pixelRatio: 1);
+        try {
+          return (await img.toByteData(format: ui.ImageByteFormat.rawRgba))!.buffer.asUint8List();
+        } finally {
+          img.dispose();
+        }
+      }))!;
+    }
+
+    final atTop = await capture();
+    expect(atTop[((120 + 2) * 100 + 50) * 4 + 3], 255, reason: 'top edge unmasked when extentBefore == 0');
+    expect(atTop[((120 + 99) * 100 + 50) * 4 + 3], lessThan(40), reason: 'bottom edge faded at non-zero y=120 offset');
+
+    controller.jumpTo(100);
+    await tester.pumpAndSettle();
+    final mid = await capture();
+    expect(mid[((120 + 0) * 100 + 50) * 4 + 3], lessThan(30), reason: 'top edge faded at non-zero y=120 offset');
+    expect(mid[((120 + 50) * 100 + 50) * 4 + 3], 255, reason: 'middle remains solid');
+    expect(mid[((120 + 99) * 100 + 50) * 4 + 3], lessThan(40), reason: 'bottom edge faded at non-zero y=120 offset');
   });
 
   testWidgets('theme colors, each glow, glow visibility, size and DPR invalidate the gradient', (tester) async {
