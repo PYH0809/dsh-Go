@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/scheduler.dart';
 
 import '../common/pressable.dart';
 import '../common/ui_trace.dart';
@@ -213,7 +214,7 @@ class GlassSurface extends StatelessWidget {
       content = grouped
           ? BackdropFilter.grouped(filterConfig: config, enabled: sampling, child: content)
           : BackdropFilter(filterConfig: config, enabled: sampling, child: content);
-      content = _clip(content);
+      content = _clip(content, fastRRect: shadowCaching && tier == GlassTier.sheet);
     }
 
     if (s.shadows.isNotEmpty) {
@@ -249,10 +250,13 @@ class GlassSurface extends StatelessWidget {
     return content;
   }
 
-  Widget _clip(Widget child) {
+  Widget _clip(Widget child, {bool fastRRect = false}) {
     if (circle) return ClipOval(child: child);
     if (_isStadium) {
       return ClipRRect(borderRadius: const BorderRadius.all(Radius.circular(999)), child: child);
+    }
+    if (fastRRect) {
+      return ClipRRect(borderRadius: _radius, child: child);
     }
     return ClipRSuperellipse(borderRadius: _radius, child: child);
   }
@@ -482,23 +486,68 @@ class _CachedGlassShadow extends StatefulWidget {
   State<_CachedGlassShadow> createState() => _CachedGlassShadowState();
 }
 
+/// Suspends [SnapshotWidget] texture allocation while the glass surface is
+/// actively resizing across consecutive frames (e.g. an expanding `TodoBar` or
+/// `DraggableScrollableSheet`), then recaptures once settled:
+/// - Set: [_RenderShadowSizeObserver] calls [_onSizeChanged] during `performLayout`
+///   whenever the shadow box size changes after its initial layout, setting
+///   `_resizing = true` and disabling `allowSnapshotting`.
+/// - Cleared: a two-frame idle debounce clears `_resizing = false` once an
+///   entire frame elapses without a newer `_settledTicket`, re-enabling texture
+///   caching without drawing `clipPath + blurRadius=32` during active drags.
 class _CachedGlassShadowState extends State<_CachedGlassShadow> {
   final _controller = SnapshotController(allowSnapshotting: true);
+  Size? _lastSize;
+  bool _resizing = false;
+  int _settledTicket = 0;
 
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    final active = TickerMode.valuesOf(context).enabled;
+  bool get _resizingValue => _resizing;
+
+  void _sync() {
+    final active = !_resizing && TickerMode.valuesOf(context).enabled;
     if (_controller.allowSnapshotting != active) {
       _controller.allowSnapshotting = active;
       if (!active) _controller.clear();
     }
   }
 
+  void _onSizeChanged(Size next) {
+    final previous = _lastSize;
+    _lastSize = next;
+    if (previous == null || previous == next) return;
+    final wasResizing = _resizing;
+    _resizing = true;
+    if (_controller.allowSnapshotting) {
+      _controller.allowSnapshotting = false;
+      _controller.clear();
+    }
+    final ticket = ++_settledTicket;
+    SchedulerBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (!wasResizing && _resizing) setState(() {});
+      if (ticket != _settledTicket) return;
+      SchedulerBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || ticket != _settledTicket) return;
+        setState(() {
+          _resizing = false;
+          _sync();
+        });
+      });
+      SchedulerBinding.instance.ensureVisualUpdate();
+    });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _sync();
+  }
+
   @override
   void didUpdateWidget(_CachedGlassShadow oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (widget.painter.shouldRepaint(oldWidget.painter)) _controller.clear();
+    _sync();
   }
 
   @override
@@ -508,12 +557,45 @@ class _CachedGlassShadowState extends State<_CachedGlassShadow> {
   }
 
   @override
-  Widget build(BuildContext context) => SnapshotWidget(
-    controller: _controller,
-    // SnapshotWidget also invalidates its image when MediaQuery's DPR changes.
-    autoresize: true,
-    child: CustomPaint(painter: widget.painter),
+  Widget build(BuildContext context) => _ShadowSizeObserver(
+    onSizeChanged: _onSizeChanged,
+    child: SnapshotWidget(
+      controller: _controller,
+      // SnapshotWidget also invalidates its image when MediaQuery's DPR changes.
+      autoresize: true,
+      child: _resizingValue ? const SizedBox.expand() : CustomPaint(painter: widget.painter),
+    ),
   );
+}
+
+class _ShadowSizeObserver extends SingleChildRenderObjectWidget {
+  const _ShadowSizeObserver({required this.onSizeChanged, required super.child});
+
+  final ValueChanged<Size> onSizeChanged;
+
+  @override
+  RenderObject createRenderObject(BuildContext context) => _RenderShadowSizeObserver(onSizeChanged);
+
+  @override
+  void updateRenderObject(BuildContext context, _RenderShadowSizeObserver renderObject) =>
+      renderObject.onSizeChanged = onSizeChanged;
+}
+
+class _RenderShadowSizeObserver extends RenderProxyBox {
+  _RenderShadowSizeObserver(this.onSizeChanged);
+
+  ValueChanged<Size> onSizeChanged;
+  Size? _reported;
+
+  @override
+  void performLayout() {
+    final next = constraints.biggest;
+    if (_reported != next) {
+      _reported = next;
+      onSizeChanged(next);
+    }
+    super.performLayout();
+  }
 }
 
 /// 发丝描边 + 顶边高光。描边画在形状内侧,裁剪时不会被切掉一半。

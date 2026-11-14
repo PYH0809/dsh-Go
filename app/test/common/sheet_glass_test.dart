@@ -141,4 +141,115 @@ void main() {
     final decoration = tester.widgetList<DecoratedBox>(fill).first.decoration as ShapeDecoration;
     expect(decoration.color, glass.fill);
   });
+
+  testWidgets('IME keyboard rise lifts the sheet outside GlassSurface without resizing glass or rebuilding content', (
+    tester,
+  ) async {
+    GlassSurface.shadowCaching = true;
+    addTearDown(() {
+      GlassSurface.shadowCaching = false;
+      tester.view.resetViewInsets();
+    });
+    final oldDisableShadows = debugDisableShadows;
+    debugDisableShadows = false;
+    try {
+      var contentBuilds = 0;
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildLightTheme(),
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: TextButton(
+                onPressed: () => showAppSheet<void>(
+                  context,
+                  isScrollControlled: true,
+                  builder: (sheetContext) => Padding(
+                    padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(sheetContext).bottom),
+                    child: Builder(
+                      builder: (context) {
+                        contentBuilds++;
+                        return const SizedBox(height: 220, child: Text('邮箱输入'));
+                      },
+                    ),
+                  ),
+                ),
+                child: const Text('打开'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('打开'));
+      await tester.pumpAndSettle();
+      expect(_blurring(tester), isTrue);
+      final glassFinder = find.descendant(of: find.byType(BottomSheet), matching: find.byType(GlassSurface));
+      final restingRect = tester.getRect(glassFinder);
+      final buildsAtRest = contentBuilds;
+
+      // Simulate 10 consecutive Android IME animation frames (0 -> 260dp):
+      final dpr = tester.view.devicePixelRatio;
+      for (var step = 1; step <= 10; step++) {
+        final insetDp = 26.0 * step;
+        tester.view.viewInsets = FakeViewPadding(bottom: insetDp * dpr);
+        await tester.pump(const Duration(milliseconds: 16));
+        expect(_blurring(tester), isFalse, reason: 'blur suspended during IME frame $step');
+        final rect = tester.getRect(glassFinder);
+        expect(rect.height, restingRect.height, reason: 'GlassSurface height stays fixed instead of stretching behind IME');
+        expect(rect.bottom, closeTo(restingRect.bottom - insetDp, 0.5), reason: 'sheet rises cleanly above IME');
+      }
+      expect(contentBuilds, buildsAtRest, reason: 'inner sheet content is shielded from per-frame viewInsets rebuilds');
+
+      await tester.pumpAndSettle();
+      expect(_blurring(tester), isTrue, reason: 'blur fades back in once IME settles');
+      expect(_settled(tester), 1);
+    } finally {
+      debugDisableShadows = oldDisableShadows;
+    }
+  });
+
+  testWidgets('DraggableScrollableSheet resize suspends blur while dragging up and fades back in at rest', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildLightTheme(),
+        home: Builder(
+          builder: (context) => Scaffold(
+            body: TextButton(
+              onPressed: () => showAppSheet<void>(
+                context,
+                isScrollControlled: true,
+                builder: (_) => DraggableScrollableSheet(
+                  expand: false,
+                  initialChildSize: 0.5,
+                  minChildSize: 0.3,
+                  maxChildSize: 0.9,
+                  builder: (context, controller) => ListView.builder(
+                    controller: controller,
+                    itemCount: 30,
+                    itemBuilder: (context, index) => SizedBox(height: 48, child: Text('步骤 $index')),
+                  ),
+                ),
+              ),
+              child: const Text('打开'),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('打开'));
+    await tester.pumpAndSettle();
+    expect(_blurring(tester), isTrue);
+
+    final gesture = await tester.startGesture(tester.getCenter(find.text('步骤 2')));
+    await gesture.moveBy(const Offset(0, -30));
+    await tester.pump();
+    await gesture.moveBy(const Offset(0, -100));
+    await tester.pump();
+    expect(_blurring(tester), isFalse, reason: 'blur suspended while DraggableScrollableSheet expands');
+    await gesture.up();
+    await tester.pumpAndSettle();
+    expect(_blurring(tester), isTrue, reason: 'blur resumes once DraggableScrollableSheet settles');
+    expect(_settled(tester), 1);
+  });
 }

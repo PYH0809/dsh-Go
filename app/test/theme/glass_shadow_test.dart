@@ -135,6 +135,12 @@ void main() {
         for (final next in [const Size(120, 140), const Size(170, 90)]) {
           size.value = next;
           await tester.pump();
+          if (next != const Size(120, 140)) {
+            // Two-frame idle debounce clears resizing once a full frame passes
+            // without further size changes, then recaptures a single texture.
+            await tester.pump();
+            await tester.pump();
+          }
           final glass = tester.getRect(find.byType(GlassSurface));
           expect(glass.size, next, reason: 'the shadow must not affect layout');
           expect(tester.getRect(_shadowBoundary), glass.inflate(extent));
@@ -146,6 +152,18 @@ void main() {
         }
         expect(images, hasLength(2), reason: 'a size change creates one replacement texture');
         expect(original.debugDisposed, isTrue);
+
+        // Consecutive per-frame resizing (e.g. expanding TodoBar) must NOT allocate
+        // intermediate textures on every frame!
+        final beforeBurst = images.length;
+        for (var h = 100.0; h <= 220.0; h += 15.0) {
+          size.value = Size(170, h);
+          await tester.pump(const Duration(milliseconds: 16));
+        }
+        expect(images.length, beforeBurst, reason: '0 textures allocated during consecutive resize frames');
+        await tester.pump(const Duration(milliseconds: 16));
+        await tester.pump(const Duration(milliseconds: 16));
+        expect(images.length, beforeBurst + 1, reason: 'exactly 1 texture recaptured once settled');
         expect(tester.takeException(), isNull);
       } finally {
         debugDisableShadows = oldDisableShadows;

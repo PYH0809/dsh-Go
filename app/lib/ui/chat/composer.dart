@@ -158,9 +158,12 @@ class Composer extends StatefulWidget {
   /// and the field's own scrolling). A phone on its side with the keyboard
   /// up, or very large text, would otherwise push the chat to nothing; an
   /// upright phone under a tall keyboard keeps six up to about 1.2× text.
-  static int linesFor(BuildContext pageContext) {
-    final available = MediaQuery.sizeOf(pageContext).height - MediaQuery.viewInsetsOf(pageContext).bottom;
-    final line = MediaQuery.textScalerOf(pageContext).scale(_fontSize) * _lineHeight;
+  static int linesFor(BuildContext pageContext) =>
+      linesForInset(pageContext, MediaQuery.viewInsetsOf(pageContext).bottom);
+
+  static int linesForInset(BuildContext context, double keyboardInset) {
+    final available = MediaQuery.sizeOf(context).height - keyboardInset;
+    final line = MediaQuery.textScalerOf(context).scale(_fontSize) * _lineHeight;
     if (line <= 0 || available <= 0) return 2;
     return (available * 0.4 / line).floor().clamp(2, 6);
   }

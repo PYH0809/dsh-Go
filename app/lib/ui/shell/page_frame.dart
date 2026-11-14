@@ -174,43 +174,49 @@ class _AppPageState extends State<AppPage> {
         ),
       );
     }
-    final page = AnnotatedRegion<SystemUiOverlayStyle>(
-      value: dshSystemOverlay(theme.brightness),
-      child: AppBackdrop(
-        child: Scaffold(
-          backgroundColor: Colors.transparent,
-          body: Stack(
-            children: [
-              CustomScrollView(
-                controller: _controller,
-                physics: AppMotion.scrollPhysics(context),
-                slivers: [
-                  SliverToBoxAdapter(child: SizedBox(height: top)),
-                  if (header != null)
-                    SliverPadding(
-                      padding: side,
-                      sliver: SliverToBoxAdapter(
-                        child: ValueListenableBuilder<double>(
-                          valueListenable: _offset,
-                          // Pulled past the top (only the fluid tier's lists go there), the
-                          // headline swells a little with the pull.
-                          builder: (context, offset, child) => Opacity(
-                            opacity: _headerOpacity(offset),
-                            alwaysIncludeSemantics: true,
-                            child: Transform.scale(
-                              scale: 1 + (-offset / 900).clamp(0.0, 0.1),
-                              alignment: AlignmentDirectional.topStart,
-                              child: child,
+        final current = ModalRoute.of<Object?>(context)?.isCurrent ?? true;
+        final uncovered = !AppBackdrop.snapshotCaching || current;
+        final page = AnnotatedRegion<SystemUiOverlayStyle>(
+          value: dshSystemOverlay(theme.brightness),
+          child: AppBackdrop(
+            child: Scaffold(
+              backgroundColor: Colors.transparent,
+              resizeToAvoidBottomInset: uncovered,
+              body: Stack(
+                children: [
+                  () {
+                    final scroll = CustomScrollView(
+                      controller: _controller,
+                      physics: AppMotion.scrollPhysics(context),
+                      slivers: [
+                        SliverToBoxAdapter(child: SizedBox(height: top)),
+                        if (header != null)
+                          SliverPadding(
+                            padding: side,
+                            sliver: SliverToBoxAdapter(
+                              child: ValueListenableBuilder<double>(
+                                valueListenable: _offset,
+                                // Pulled past the top (only the fluid tier's lists go there), the
+                                // headline swells a little with the pull.
+                                builder: (context, offset, child) => Opacity(
+                                  opacity: _headerOpacity(offset),
+                                  alwaysIncludeSemantics: true,
+                                  child: Transform.scale(
+                                    scale: 1 + (-offset / 900).clamp(0.0, 0.1),
+                                    alignment: AlignmentDirectional.topStart,
+                                    child: child,
+                                  ),
+                                ),
+                                child: KeyedSubtree(key: _headerKey, child: header),
+                              ),
                             ),
                           ),
-                          child: KeyedSubtree(key: _headerKey, child: header),
-                        ),
-                      ),
-                    ),
-                  for (final sliver in widget.slivers) SliverPadding(padding: side, sliver: sliver),
-                  if (widget.padBottom) SliverToBoxAdapter(child: SizedBox(height: padding.bottom + 32)),
-                ],
-              ),
+                        for (final sliver in widget.slivers) SliverPadding(padding: side, sliver: sliver),
+                        if (widget.padBottom) SliverToBoxAdapter(child: SizedBox(height: padding.bottom + 32)),
+                      ],
+                    );
+                    return AppBackdrop.snapshotCaching ? RepaintBoundary(child: scroll) : scroll;
+                  }(),
               Positioned(
                 left: 0,
                 right: 0,
@@ -276,7 +282,12 @@ class _AppPageState extends State<AppPage> {
         ),
       ),
     );
-    return UiTrace(scope: 'page', child: page);
+    return GlassBackdropScope(
+      enabled: GlassBackdropScope.enabledOf(context) && uncovered,
+      translucentWhenDisabled: GlassBackdropScope.translucentWhenDisabledOf(context),
+      animationsEnabled: GlassBackdropScope.animationsEnabledOf(context) && uncovered,
+      child: UiTrace(scope: 'page', child: page),
+    );
   }
 }
 

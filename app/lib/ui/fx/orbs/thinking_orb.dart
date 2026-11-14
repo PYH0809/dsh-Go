@@ -10,6 +10,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 
+import '../../theme/glass.dart';
 import '../../theme/motion.dart';
 import 'orb_core.dart';
 import 'orb_modes.dart';
@@ -124,12 +125,14 @@ class _ThinkingOrbState extends State<ThinkingOrb> with SingleTickerProviderStat
   final _frame = OrbFrame();
   late final Ticker _ticker = createTicker((_) => _clock.tick());
   bool _reduced = false;
+  bool _animationsEnabled = true;
   double? _frozen;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     _reduced = AppMotion.reduced(context);
+    _animationsEnabled = TickerMode.valuesOf(context).enabled && GlassBackdropScope.animationsEnabledOf(context);
     _frozen = context.dependOnInheritedWidgetOfExactType<OrbFrozenTime>()?.t;
     _sync();
   }
@@ -143,7 +146,7 @@ class _ThinkingOrbState extends State<ThinkingOrb> with SingleTickerProviderStat
   void _sync() {
     _clock.speed = resolvePreset(widget.state, widget.size).speed * widget.speed;
     final still = _frozen ?? (_reduced ? _stillT : null);
-    final run = still == null && !widget.paused;
+    final run = still == null && !widget.paused && _animationsEnabled;
     _clock.running = run;
     if (still != null && still != _clock.t) {
       _clock
