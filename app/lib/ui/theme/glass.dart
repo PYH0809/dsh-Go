@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/scheduler.dart';
 
 import '../common/pressable.dart';
 import '../common/ui_trace.dart';
@@ -213,7 +214,7 @@ class GlassSurface extends StatelessWidget {
       content = grouped
           ? BackdropFilter.grouped(filterConfig: config, enabled: sampling, child: content)
           : BackdropFilter(filterConfig: config, enabled: sampling, child: content);
-      content = _clip(content);
+      content = _clip(content, fastRRect: shadowCaching && tier == GlassTier.sheet);
     }
 
     if (s.shadows.isNotEmpty) {
@@ -249,10 +250,13 @@ class GlassSurface extends StatelessWidget {
     return content;
   }
 
-  Widget _clip(Widget child) {
+  Widget _clip(Widget child, {bool fastRRect = false}) {
     if (circle) return ClipOval(child: child);
     if (_isStadium) {
       return ClipRRect(borderRadius: const BorderRadius.all(Radius.circular(999)), child: child);
+    }
+    if (fastRRect) {
+      return ClipRRect(borderRadius: _radius, child: child);
     }
     return ClipRSuperellipse(borderRadius: _radius, child: child);
   }
@@ -473,6 +477,15 @@ class _RenderShadowStack extends RenderBox {
   }
 }
 
+/// Caches the outer glass shadow into a single [SnapshotWidget] texture at rest,
+/// and suspends texture allocation during consecutive resize frames while still
+/// painting the shadow directly via [CustomPaint] (no shadow flicker):
+/// - Set: [_RenderShadowResizeGate.performLayout] detects when `constraints.biggest`
+///   changes after initial layout, immediately sets `allowSnapshotting = false`
+///   (`markNeedsPaint()` is completely legal during layout on both Skia & Impeller,
+///   unlike `markNeedsBuild()` or mutating during `paint`), and calls [onResize].
+/// - Cleared: a two-frame idle post-frame callback clears `_resizing = false` once
+///   a full frame passes without another size change, recapturing 1 texture at rest.
 class _CachedGlassShadow extends StatefulWidget {
   const _CachedGlassShadow({required this.painter});
 
@@ -484,21 +497,42 @@ class _CachedGlassShadow extends StatefulWidget {
 
 class _CachedGlassShadowState extends State<_CachedGlassShadow> {
   final _controller = SnapshotController(allowSnapshotting: true);
+  bool _resizing = false;
+  int _settledTicket = 0;
 
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    final active = TickerMode.valuesOf(context).enabled;
+  void _sync() {
+    final active = !_resizing && TickerMode.valuesOf(context).enabled;
     if (_controller.allowSnapshotting != active) {
       _controller.allowSnapshotting = active;
       if (!active) _controller.clear();
     }
   }
 
+  void _onLayoutResize() {
+    _resizing = true;
+    final ticket = ++_settledTicket;
+    SchedulerBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || ticket != _settledTicket) return;
+      SchedulerBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || ticket != _settledTicket) return;
+        _resizing = false;
+        _sync();
+      });
+      SchedulerBinding.instance.ensureVisualUpdate();
+    });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _sync();
+  }
+
   @override
   void didUpdateWidget(_CachedGlassShadow oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (widget.painter.shouldRepaint(oldWidget.painter)) _controller.clear();
+    _sync();
   }
 
   @override
@@ -508,12 +542,64 @@ class _CachedGlassShadowState extends State<_CachedGlassShadow> {
   }
 
   @override
-  Widget build(BuildContext context) => SnapshotWidget(
+  Widget build(BuildContext context) => _ShadowResizeGate(
     controller: _controller,
-    // SnapshotWidget also invalidates its image when MediaQuery's DPR changes.
-    autoresize: true,
-    child: CustomPaint(painter: widget.painter),
+    onLayoutResize: _onLayoutResize,
+    child: SnapshotWidget(
+      controller: _controller,
+      // SnapshotWidget also invalidates its image when MediaQuery's DPR changes.
+      autoresize: true,
+      child: CustomPaint(painter: widget.painter),
+    ),
   );
+}
+
+class _ShadowResizeGate extends SingleChildRenderObjectWidget {
+  const _ShadowResizeGate({
+    required this.controller,
+    required this.onLayoutResize,
+    required super.child,
+  });
+
+  final SnapshotController controller;
+  final VoidCallback onLayoutResize;
+
+  @override
+  RenderObject createRenderObject(BuildContext context) =>
+      _RenderShadowResizeGate(controller, onLayoutResize);
+
+  @override
+  void updateRenderObject(BuildContext context, _RenderShadowResizeGate renderObject) {
+    renderObject
+      ..controller = controller
+      ..onLayoutResize = onLayoutResize;
+  }
+}
+
+class _RenderShadowResizeGate extends RenderProxyBox {
+  _RenderShadowResizeGate(this.controller, this.onLayoutResize);
+
+  SnapshotController controller;
+  VoidCallback onLayoutResize;
+  Size? _lastLaidOutSize;
+
+  @override
+  void performLayout() {
+    final next = constraints.biggest;
+    final previous = _lastLaidOutSize;
+    _lastLaidOutSize = next;
+    if (previous != null && previous != next) {
+      // Legal during performLayout: SnapshotController only calls markNeedsPaint()
+      // on _RenderSnapshotWidget (never markNeedsBuild), preventing intermediate
+      // texture allocation on this exact frame while CustomPaint draws directly!
+      if (controller.allowSnapshotting) {
+        controller.allowSnapshotting = false;
+        controller.clear();
+      }
+      onLayoutResize();
+    }
+    super.performLayout();
+  }
 }
 
 /// 发丝描边 + 顶边高光。描边画在形状内侧,裁剪时不会被切掉一半。

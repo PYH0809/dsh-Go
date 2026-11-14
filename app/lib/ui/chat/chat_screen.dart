@@ -1763,9 +1763,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
     final notice = error == null && sessionId != null ? chat?.notice : null;
     // A phone on its side with the keyboard up keeps a strip of chat: the
     // header and the dock step aside until the keyboard goes, so the latest
-    // messages stay in sight above the composer.
-    final typing =
-        MediaQuery.sizeOf(context).height < WindowClass.compactHeight && MediaQuery.viewInsetsOf(context).bottom > 0;
+    // messages stay in sight above the composer. Avoid subscribing to
+    // `viewInsetsOf` on upright phones so IME animations don't rebuild the
+    // whole 2700-line ChatScreen every frame!
+    final shortWindow = MediaQuery.sizeOf(context).height < WindowClass.compactHeight;
+    final typing = shortWindow && MediaQuery.viewInsetsOf(context).bottom > 0;
     // 「自动允许中」/「完全权限」 ride on the bar right above the composer, not a
     // row of their own: beside the activity strip while a reply generates, at
     // the start of the capsule row otherwise. Their own row only where neither
@@ -1781,12 +1783,14 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
     );
     final pageContext = context;
     final headerHeight = typing ? MediaQuery.paddingOf(context).top + AppSpace.sm : ChatHeader.heightOf(context);
+    final hardwareEnterSends = ref.watch(settingsProvider.select((s) => s.hardwareEnterSends));
 
     Widget backdrop(Widget child) => widget.backdrop ? WallpaperBackdrop(child: child) : child;
     final screen = AnnotatedRegion<SystemUiOverlayStyle>(
       value: dshSystemOverlay(Theme.of(context).brightness),
       child: backdrop(
-        Scaffold(
+        _ChatKeyboardInsetHost(
+          child: Scaffold(
           backgroundColor: Colors.transparent,
           resizeToAvoidBottomInset: true,
           // The pet stands over the page on the capsules above the
@@ -1888,10 +1892,25 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
                     id: _Slot.pluginOverlay,
                     child: RepaintBoundary(
                       child: ClipRect(
-                        child: MediaQuery(
-                          // The layout already reserves the native chrome and keyboard.
-                          data: MediaQuery.of(context).copyWith(padding: EdgeInsets.zero, viewInsets: EdgeInsets.zero),
-                          child: PluginOverlayLayer(sessionId: sessionId),
+                        child: Builder(
+                          // Local Builder: Scaffold already zeroes viewInsets below it, and
+                          // MediaQuery.of(outer context) would otherwise subscribe the whole
+                          // 2700-line ChatScreen to every IME animation frame!
+                          builder: (overlayContext) => MediaQuery.removePadding(
+                            context: overlayContext,
+                            removeLeft: true,
+                            removeTop: true,
+                            removeRight: true,
+                            removeBottom: true,
+                            child: MediaQuery.removeViewInsets(
+                              context: overlayContext,
+                              removeLeft: true,
+                              removeTop: true,
+                              removeRight: true,
+                              removeBottom: true,
+                              child: PluginOverlayLayer(sessionId: sessionId),
+                            ),
+                          ),
                         ),
                       ),
                     ),
@@ -2182,78 +2201,82 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
                                 if (readOnly)
                                   const ReadOnlyBar()
                                 else
-                                  Composer(
-                                    hardwareEnterSends: ref.watch(settingsProvider.select((s) => s.hardwareEnterSends)),
-                                    controller: _input,
-                                    groupId: _composerGroup,
-                                    // The page's context: Scaffold drops the keyboard inset below.
-                                    maxLines: Composer.linesFor(pageContext),
-                                    focusNode: _focus,
-                                    connected: connected,
-                                    running: chat?.running ?? false,
-                                    stopping: chat?.stopping ?? false,
-                                    sessionReady: chat?.controlReady ?? true,
-                                    busy: _creating != null || _syncWait != null,
-                                    // The header, the tool row and the strip
-                                    // already say an approval waits: the hint
-                                    // stays the plain one.
-                                    waiting: approval != null || question != null,
-                                    modeLabel: question == null
-                                        ? null
-                                        : answerInComposer
-                                        ? l10n.chatAnswerMode
-                                        : l10n.chatMessageMode,
-                                    waitHint: approval != null
-                                        ? null
-                                        : answerInComposer
-                                        ? l10n.chatAnswerHint
-                                        : question != null
-                                        ? l10n.commonWaitingAnswer
-                                        : null,
-                                    placeholder: generate == null
-                                        ? null
-                                        : _editing && !generate.isVideo
-                                        ? l10n.mediaHintEdit
-                                        : generate.isVideo
-                                        ? l10n.mediaHintVideo
-                                        : l10n.mediaHintImage,
-                                    onSend: _send,
-                                    onSendOptions: chat?.controlReady ?? true ? _sendOptions : null,
-                                    voice: _voice,
-                                    onKeyEvent: _composerKey,
-                                    onContentInserted: connected ? _pasteContent : null,
-                                    onStop: _stop,
-                                    hasAttachments: _drafts.isNotEmpty,
-                                    leading: AttachButton(onPressed: connected ? _attach : null),
-                                    keyboardInset: MediaQuery.viewInsetsOf(pageContext).bottom,
-                                    footer: _composerOpens(pageContext) && !isChild
-                                        ? ComposerModelPill(
-                                            selection: sessionId == null ? pendingModel : chat?.model,
-                                            onSelected: _modelTarget(),
-                                          )
-                                        : null,
-                                    tray: ComposerTrayStack.maybe(
-                                      quote: switch (quote) {
-                                        final quote? => QuoteChip(
-                                          quote: quote,
-                                          onRemove: () => ref.read(composerQuoteProvider.notifier).clear(_draftKey),
-                                        ),
-                                        null => null,
-                                      },
-                                      attachments: _drafts.isEmpty
-                                          ? null
-                                          : ComposerTray(
-                                              items: _drafts,
-                                              onRemove: _removeDraft,
-                                              labels: frameLabels(generate, generateModel, _drafts.length),
+                                  Builder(
+                                    builder: (composerContext) {
+                                      final keyboardInset = _ChatKeyboardInsetScope.of(composerContext);
+                                      return Composer(
+                                        hardwareEnterSends: hardwareEnterSends,
+                                        controller: _input,
+                                        groupId: _composerGroup,
+                                        maxLines: Composer.linesForInset(composerContext, keyboardInset),
+                                        focusNode: _focus,
+                                        connected: connected,
+                                        running: chat?.running ?? false,
+                                        stopping: chat?.stopping ?? false,
+                                        sessionReady: chat?.controlReady ?? true,
+                                        busy: _creating != null || _syncWait != null,
+                                        // The header, the tool row and the strip
+                                        // already say an approval waits: the hint
+                                        // stays the plain one.
+                                        waiting: approval != null || question != null,
+                                        modeLabel: question == null
+                                            ? null
+                                            : answerInComposer
+                                            ? l10n.chatAnswerMode
+                                            : l10n.chatMessageMode,
+                                        waitHint: approval != null
+                                            ? null
+                                            : answerInComposer
+                                            ? l10n.chatAnswerHint
+                                            : question != null
+                                            ? l10n.commonWaitingAnswer
+                                            : null,
+                                        placeholder: generate == null
+                                            ? null
+                                            : _editing && !generate.isVideo
+                                            ? l10n.mediaHintEdit
+                                            : generate.isVideo
+                                            ? l10n.mediaHintVideo
+                                            : l10n.mediaHintImage,
+                                        onSend: _send,
+                                        onSendOptions: chat?.controlReady ?? true ? _sendOptions : null,
+                                        voice: _voice,
+                                        onKeyEvent: _composerKey,
+                                        onContentInserted: connected ? _pasteContent : null,
+                                        onStop: _stop,
+                                        hasAttachments: _drafts.isNotEmpty,
+                                        leading: AttachButton(onPressed: connected ? _attach : null),
+                                        keyboardInset: keyboardInset,
+                                        footer: _composerOpens(pageContext) && !isChild
+                                            ? ComposerModelPill(
+                                                selection: sessionId == null ? pendingModel : chat?.model,
+                                                onSelected: _modelTarget(),
+                                              )
+                                            : null,
+                                        tray: ComposerTrayStack.maybe(
+                                          quote: switch (quote) {
+                                            final quote? => QuoteChip(
+                                              quote: quote,
+                                              onRemove: () => ref.read(composerQuoteProvider.notifier).clear(_draftKey),
                                             ),
-                                    ),
-                                    accessory: sessionId == null || contextFraction == null
-                                        ? null
-                                        : ContextRing(
-                                            fraction: contextFraction,
-                                            onTap: () => _openUsage(sessionId, chat?.model),
-                                          ),
+                                            null => null,
+                                          },
+                                          attachments: _drafts.isEmpty
+                                              ? null
+                                              : ComposerTray(
+                                                  items: _drafts,
+                                                  onRemove: _removeDraft,
+                                                  labels: frameLabels(generate, generateModel, _drafts.length),
+                                                ),
+                                        ),
+                                        accessory: sessionId == null || contextFraction == null
+                                            ? null
+                                            : ContextRing(
+                                                fraction: contextFraction,
+                                                onTap: () => _openUsage(sessionId, chat?.model),
+                                              ),
+                                      );
+                                    },
                                   ),
                               ],
                             ),
@@ -2266,6 +2289,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
               ),
             ),
           ),
+        ),
         ),
       ),
     );
@@ -2669,6 +2693,30 @@ class _RouteInteractionScopeState extends State<_RouteInteractionScope> {
       child: widget.child,
     );
   }
+}
+
+class _ChatKeyboardInsetHost extends StatelessWidget {
+  const _ChatKeyboardInsetHost({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => _ChatKeyboardInsetScope(
+    inset: MediaQuery.viewInsetsOf(context).bottom,
+    child: child,
+  );
+}
+
+class _ChatKeyboardInsetScope extends InheritedWidget {
+  const _ChatKeyboardInsetScope({required this.inset, required super.child});
+
+  final double inset;
+
+  static double of(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<_ChatKeyboardInsetScope>()?.inset ?? 0;
+
+  @override
+  bool updateShouldNotify(_ChatKeyboardInsetScope oldWidget) => inset != oldWidget.inset;
 }
 
 /// Wraps `_Slot.composer` in a single `RepaintBoundary` + `BackdropGroup`, and

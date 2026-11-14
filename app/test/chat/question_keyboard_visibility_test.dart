@@ -2,6 +2,7 @@ import 'package:dsh_app/state/chat_state.dart';
 import 'package:dsh_app/ui/chat/chat_header.dart';
 import 'package:dsh_app/ui/chat/chat_list.dart';
 import 'package:dsh_app/ui/chat/chat_screen.dart';
+import 'package:dsh_app/ui/chat/widgets/tool_row.dart';
 import 'package:dsh_app/ui/chat/composer.dart';
 import 'package:dsh_app/ui/chat/widgets/question_card.dart';
 import 'package:dsh_app/ui/theme/theme.dart';
@@ -10,6 +11,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'support/harness.dart';
+import 'support/sample_chat.dart';
 import 'turn_settle_test.dart' show state;
 
 Future<Finder> _openQuestion(
@@ -203,6 +205,57 @@ void main() {
     await pumpFrames(tester);
     expect(find.text('已离开询问'), findsOneWidget);
     expect(find.byType(QuestionCard), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('tapping SelectableText inside an expanded tool detail does not jump the centered chat list', (
+    tester,
+  ) async {
+    usePhoneView(tester);
+    mockClipboard(tester);
+    final items = <ChatItem>[
+      user(1, '排查卡顿'),
+      for (var i = 0; i < 6; i++)
+        tool('c$i', 'read', {'file_path': '/Users/yehan_pan/dsh-Go/app/lib/ui/chat/chat_screen_$i.dart'}, result: '1: a\n2: b'),
+      tool(
+        'edit1',
+        'edit',
+        {'file_path': '/Users/yehan_pan/dsh-Go/app/lib/ui/chat/chat_screen.dart', 'old_string': 'a', 'new_string': 'b'},
+        result: 'updated',
+      ),
+      for (var i = 0; i < 8; i++)
+        assistant(11 + i, '后续流式段落 $i：${'这是一段足够撑开视口高度的正文内容。' * 4}', streaming: i == 7),
+    ];
+    final harness = ChatHarness(
+      session: 's1',
+      states: {'s1': ChatState(loading: false, running: true, items: items)},
+    );
+    await tester.pumpWidget(testApp(const ChatScreen(), overrides: harness.overrides));
+    await pumpFrames(tester, 6);
+
+    final scrollable = find.descendant(of: find.byType(ChatList), matching: find.byType(Scrollable)).first;
+    final position = tester.state<ScrollableState>(scrollable).position;
+
+    // Scroll up to inspect the earlier tool group / edit tool, just like in the user's recording!
+    await tester.drag(find.byType(CustomScrollView), const Offset(0, 520));
+    await pumpFrames(tester, 4);
+    expect(position.extentAfter, greaterThan(200));
+
+    // Expand the tool group, then expand the edit ToolRow to expose its SelectableText file path!
+    await tester.tap(find.byType(ToolGroup).first);
+    await pumpFrames(tester, 8);
+    final editRow = find.widgetWithText(ToolRow, '编辑');
+    await tester.tap(editRow);
+    await pumpFrames(tester, 8);
+
+    final selectable = find.descendant(of: find.byType(ToolDetail), matching: find.byType(SelectableText)).first;
+    expect(selectable, findsOneWidget);
+    final pixelsBeforeTap = position.pixels;
+
+    // Tap the SelectableText path inside ToolDetail: list MUST stay rock-steady!
+    await tester.tap(selectable);
+    await pumpFrames(tester, 6);
+    expect(position.pixels, closeTo(pixelsBeforeTap, 0.5), reason: 'tapping SelectableText must not jump the chat list');
     expect(tester.takeException(), isNull);
   });
 }

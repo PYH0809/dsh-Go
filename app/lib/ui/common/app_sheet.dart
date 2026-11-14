@@ -5,9 +5,11 @@ import 'dart:math' as math;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 
 import '../../l10n/l10n.dart';
 import '../shell/adaptive/adaptive_layout.dart' show WindowClass;
+import '../theme/backdrop.dart' show AppBackdrop, BackdropVeilSampling;
 import '../theme/glass.dart';
 import '../theme/motion.dart';
 import '../theme/semantic_colors.dart';
@@ -108,7 +110,7 @@ Future<T?> showAppSheet<T>(
         mainAxisSize: MainAxisSize.min,
         children: [
           if (draggable) SheetDragHandle(onDismiss: () => Navigator.of(context).maybePop()),
-          Flexible(child: builder(context)),
+          Flexible(child: Builder(builder: builder)),
         ],
       );
       Widget surface([Animation<double>? held]) => glass
@@ -117,9 +119,47 @@ Future<T?> showAppSheet<T>(
               child: Material(type: MaterialType.transparency, child: content),
             )
           : content;
-      return holds == null ? surface() : _HeldSheetDrag(holds: holds, builder: surface);
+      return _SheetKeyboardFrame(
+        child: holds == null ? surface() : _HeldSheetDrag(holds: holds, builder: surface),
+      );
     }),
   );
+}
+
+/// Lifts the sheet above the software keyboard outside [_SheetGlass] while
+/// shielding its [child] subtree from per-frame `viewInsets` rebuilds.
+class _SheetKeyboardFrame extends StatelessWidget {
+  const _SheetKeyboardFrame({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final inset = MediaQuery.viewInsetsOf(context).bottom;
+    return _SheetKeyboardInset(
+      inset: inset,
+      child: Padding(
+        padding: EdgeInsets.only(bottom: inset),
+        child: MediaQuery.removeViewInsets(
+          context: context,
+          removeBottom: true,
+          child: child,
+        ),
+      ),
+    );
+  }
+}
+
+class _SheetKeyboardInset extends InheritedWidget {
+  const _SheetKeyboardInset({required this.inset, required super.child});
+
+  final double inset;
+
+  static double of(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<_SheetKeyboardInset>()?.inset ?? 0;
+
+  @override
+  bool updateShouldNotify(_SheetKeyboardInset oldWidget) => inset != oldWidget.inset;
 }
 
 /// A sheet's glass, which blurs only at rest. A moving blur re-samples what is
@@ -137,17 +177,86 @@ class _SheetGlass extends StatefulWidget {
   State<_SheetGlass> createState() => _SheetGlassState();
 }
 
+/// Suspends sheet blur during route transitions, finger drags, IME motion, and
+/// `DraggableScrollableSheet` resizing:
+/// - `_imeMoving`: set `true` in `didChangeDependencies` when [_SheetKeyboardInset]
+///   changes after initial mount, cleared `false` in the settled post-frame callback.
+/// - `_extentMoving`: set `true` when [DraggableScrollableNotification] reports an
+///   extent change after initial layout, cleared `false` once a frame passes without
+///   a newer `_extentTicket`, so `[AppMotion.glassIn]` fades the glass back in.
 class _SheetGlassState extends State<_SheetGlass> with SingleTickerProviderStateMixin {
   late final AnimationController _settled = AnimationController(vsync: this, duration: AppMotion.glassIn);
   Animation<double>? _route;
+  double? _lastInset;
+  bool _imeMoving = false;
+  int _imeTicket = 0;
+  double? _lastExtent;
+  bool _extentMoving = false;
+  int _extentTicket = 0;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (_route != null) return;
-    _route = ModalRoute.of(context)!.animation!..addStatusListener(_onRoute);
-    widget.held?.addListener(_sync);
+    if (_route == null) {
+      _route = ModalRoute.of(context)!.animation!..addStatusListener(_onRoute);
+      widget.held?.addListener(_sync);
+    }
+    final inset = _SheetKeyboardInset.of(context);
+    final previous = _lastInset;
+    _lastInset = inset;
+    if (previous != null && previous != inset) {
+      _imeMoving = true;
+      final ticket = ++_imeTicket;
+      SchedulerBinding.instance.addPostFrameCallback((_) {
+        // Two-frame idle debounce: wait one subsequent frame without a new IME
+        // inset step before fading glass back in, so continuous Android
+        // WindowInsetsAnimation frames never restart `_settled.forward()`!
+        SchedulerBinding.instance.addPostFrameCallback((_) {
+          if (!mounted || ticket != _imeTicket) return;
+          _imeMoving = false;
+          _sync();
+        });
+        SchedulerBinding.instance.ensureVisualUpdate();
+      });
+    }
     _sync();
+  }
+
+  bool _onExtent(DraggableScrollableNotification notification) {
+    final extent = notification.extent;
+    final previous = _lastExtent ?? notification.initialExtent;
+    _lastExtent = extent;
+    if ((previous - extent).abs() > 1e-4) {
+      _extentMoving = true;
+      final phase = SchedulerBinding.instance.schedulerPhase;
+      final safeSync =
+          phase != SchedulerPhase.persistentCallbacks && phase != SchedulerPhase.midFrameMicrotasks;
+      if (safeSync) _sync();
+      final ticket = ++_extentTicket;
+      SchedulerBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        if (!safeSync && _extentMoving) _sync();
+        // Wait one subsequent frame without a new notification so idle frames
+        // clear `_extentMoving` while active 60/120Hz drags keep it true!
+        SchedulerBinding.instance.addPostFrameCallback((_) {
+          if (!mounted || ticket != _extentTicket) return;
+          _extentMoving = false;
+          _sync();
+        });
+        SchedulerBinding.instance.ensureVisualUpdate();
+      });
+    }
+    // Bubble up so Material's `BottomSheet.extentChanged` still receives it!
+    return false;
+  }
+
+  @override
+  void didUpdateWidget(_SheetGlass oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.held != widget.held) {
+      oldWidget.held?.removeListener(_sync);
+      widget.held?.addListener(_sync);
+    }
   }
 
   @override
@@ -161,8 +270,8 @@ class _SheetGlassState extends State<_SheetGlass> with SingleTickerProviderState
   void _onRoute(AnimationStatus _) => _sync();
 
   void _sync() {
-    if (!_route!.isCompleted || (widget.held?.value ?? 0) != 0) {
-      if (_settled.value != 0) _settled.value = 0;
+    if (!_route!.isCompleted || (widget.held?.value ?? 0) != 0 || _imeMoving || _extentMoving) {
+      if (_settled.value != 0 || _settled.isAnimating) _settled.reset();
     } else if (AppMotion.reduced(context)) {
       _settled.value = 1;
     } else if (!_settled.isForwardOrCompleted) {
@@ -171,16 +280,37 @@ class _SheetGlassState extends State<_SheetGlass> with SingleTickerProviderState
   }
 
   @override
-  Widget build(BuildContext context) => AnimatedBuilder(
-    animation: _settled,
-    builder: (context, child) => GlassSurface(
-      tier: GlassTier.sheet,
-      borderRadius: const BorderRadius.vertical(top: Radius.circular(AppShape.xl)),
-      settled: _settled.value,
-      child: child,
-    ),
-    child: widget.child,
-  );
+  Widget build(BuildContext context) {
+    // Over the default smooth gradient backdrop (no custom wallpaper picture),
+    // translucent sheet fill already blends cleanly over the darkened modal
+    // barrier without a costly full-screen sigma=24 BackdropFilter pass on
+    // every content scroll frame! Custom wallpapers keep live backdrop blur.
+    final skipPlainBlur = AppBackdrop.snapshotCaching && !BackdropVeilSampling.hasPictureOf(context);
+    final child = AppBackdrop.snapshotCaching ? RepaintBoundary(child: widget.child) : widget.child;
+    final glass = NotificationListener<DraggableScrollableNotification>(
+      onNotification: _onExtent,
+      child: AnimatedBuilder(
+        animation: _settled,
+        builder: (context, child) {
+          final surface = GlassSurface(
+            tier: GlassTier.sheet,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(AppShape.xl)),
+            settled: _settled.value,
+            child: child,
+          );
+          return AppBackdrop.snapshotCaching ? RepaintBoundary(child: surface) : surface;
+        },
+        child: child,
+      ),
+    );
+    if (!skipPlainBlur) return glass;
+    return GlassBackdropScope(
+      enabled: false,
+      translucentWhenDisabled: true,
+      animationsEnabled: GlassBackdropScope.animationsEnabledOf(context),
+      child: glass,
+    );
+  }
 }
 
 /// A draggable sheet's drag while one of its [SheetDragHolds] is on.

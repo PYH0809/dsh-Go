@@ -7,6 +7,7 @@ import 'dart:math' as math;
 
 import 'package:dsh_client/dsh_client.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show ScrollDirection;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../l10n/l10n.dart';
@@ -91,25 +92,27 @@ class TrajectorySheet extends ConsumerWidget {
                   _Header(trace: trace, total: total),
                   _Composition(trace: trace, total: total),
                   Expanded(
-                    child: _EdgeFade(
-                      child: _FollowTail(
+                    child: () {
+                      final list = _FollowTail(
                         controller: controller,
                         follow: trace.running,
-                        child: SingleChildScrollView(
+                        child: TrajectoryList.scrollable(
                           controller: controller,
                           padding: const EdgeInsets.only(top: 4, bottom: 8),
-                          child: TrajectoryList(
-                            trace: trace,
-                            total: total,
-                            tools: tools,
-                            inset: 20,
-                            onOpen: (span) =>
-                                Navigator.of(context)
-                                    .push(StepDetailPage.route(sessionId: sessionId, turn: trace.turn, span: span)),
-                          ),
+                          trace: trace,
+                          total: total,
+                          tools: tools,
+                          inset: 20,
+                          onOpen: (span) =>
+                              Navigator.of(context)
+                                  .push(StepDetailPage.route(sessionId: sessionId, turn: trace.turn, span: span)),
                         ),
-                      ),
-                    ),
+                      );
+                      // Avoid ShaderMaskLayer offscreen saveLayer on every scroll frame on Impeller!
+                      return AppBackdrop.snapshotCaching
+                          ? ClipRect(child: RepaintBoundary(child: list))
+                          : _EdgeFade(child: list);
+                    }(),
                   ),
                   TraceUsageFooter(trace: trace),
                   const SizedBox(height: 12),
@@ -143,6 +146,7 @@ class _FollowTail extends StatefulWidget {
 
 class _FollowTailState extends State<_FollowTail> {
   bool _pinned = true;
+  bool _sticking = false;
 
   @override
   void initState() {
@@ -171,17 +175,38 @@ class _FollowTailState extends State<_FollowTail> {
     final c = widget.controller;
     if (!c.hasClients || c.positions.length != 1) return;
     final p = c.position;
-    _pinned = p.maxScrollExtent - p.pixels < 24;
+    if (p.userScrollDirection == ScrollDirection.forward) {
+      _pinned = false;
+    } else if (!_sticking) {
+      _pinned = p.maxScrollExtent - p.pixels < 24;
+    }
   }
 
   void _stick() {
-    if (!widget.follow || !_pinned) return;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    if (!widget.follow || !_pinned || _sticking) return;
+    _sticking = true;
+    var attempts = 0;
+    void step(Duration _) {
       final c = widget.controller;
-      if (!mounted || !c.hasClients || c.positions.length != 1) return;
+      if (!mounted || !widget.follow || !_pinned || !c.hasClients || c.positions.length != 1) {
+        _sticking = false;
+        return;
+      }
       final p = c.position;
+      if (p.userScrollDirection != ScrollDirection.idle) {
+        _sticking = false;
+        return;
+      }
       if (p.pixels != p.maxScrollExtent) p.jumpTo(p.maxScrollExtent);
-    });
+      attempts++;
+      if (attempts < 4 && p.maxScrollExtent - p.pixels > 0.5) {
+        WidgetsBinding.instance.addPostFrameCallback(step);
+      } else {
+        _sticking = false;
+      }
+    }
+
+    WidgetsBinding.instance.addPostFrameCallback(step);
   }
 
   @override
@@ -412,8 +437,22 @@ class TrajectoryList extends StatefulWidget {
     required this.tools,
     this.onOpen,
     this.inset = 16,
+  }) : controller = null,
+       padding = EdgeInsets.zero;
+
+  const TrajectoryList.scrollable({
+    super.key,
+    required ScrollController this.controller,
+    this.padding = EdgeInsets.zero,
+    required this.trace,
+    required this.total,
+    required this.tools,
+    this.onOpen,
+    this.inset = 16,
   });
 
+  final ScrollController? controller;
+  final EdgeInsetsGeometry padding;
   final TurnTrace trace;
   final Duration total;
   final Map<String, ToolChatItem> tools;
@@ -430,55 +469,70 @@ class _TrajectoryListState extends State<TrajectoryList> {
   /// 展开的组(按组里第一段的 seq)。
   final _expanded = <int>{};
 
+  Widget _buildRow(TrajectoryRow row, TurnTrace trace, Duration total, DateTime now) => switch (row) {
+    SpanRow(:final span) => SpanTile(
+      span: span,
+      trace: trace,
+      total: total,
+      now: now,
+      inset: widget.inset,
+      tool: widget.tools[span.callId],
+      onTap: widget.onOpen == null ? null : () => widget.onOpen!(span),
+    ),
+    SpanGroupRow(:final spans) => _GroupTile(
+      spans: spans,
+      trace: trace,
+      total: total,
+      now: now,
+      inset: widget.inset,
+      tools: widget.tools,
+      expanded: _expanded.contains(spans.first.seq),
+      onToggle: () => setState(() {
+        if (!_expanded.remove(spans.first.seq)) {
+          _expanded.add(spans.first.seq);
+        }
+      }),
+      onOpen: widget.onOpen,
+    ),
+  };
+
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
     final trace = widget.trace;
     final rows = trajectoryRows(trace);
     if (rows.isEmpty) {
-      return Padding(
+      final empty = Padding(
         padding: EdgeInsets.fromLTRB(widget.inset, 8, widget.inset, 12),
         child: Text(
           l10n.activityTraceNoSteps,
           style: Theme.of(context).textTheme.bodySmall?.copyWith(color: DshColors.of(context).textTertiary),
         ),
       );
+      if (widget.controller == null) return empty;
+      return ListView(controller: widget.controller, padding: widget.padding, children: [empty]);
     }
     final total = widget.total.inMilliseconds <= 0 ? const Duration(milliseconds: 1) : widget.total;
     final now = trace.start.add(widget.total);
-    return Column(
+    // Short turns (<= 16 rows) build a single Column; longer turns virtualize
+    // with ListView.builder so 80+ step traces stay O(viewport) regardless of
+    // rendering cache flags!
+    if (widget.controller != null && rows.length > 16) {
+      return ListView.builder(
+        controller: widget.controller,
+        padding: widget.padding,
+        addRepaintBoundaries: AppBackdrop.snapshotCaching,
+        itemCount: rows.length,
+        itemBuilder: (context, index) => _buildRow(rows[index], trace, total, now),
+      );
+    }
+    final column = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
-      children: [
-        for (final row in rows)
-          switch (row) {
-            SpanRow(:final span) => SpanTile(
-              span: span,
-              trace: trace,
-              total: total,
-              now: now,
-              inset: widget.inset,
-              tool: widget.tools[span.callId],
-              onTap: widget.onOpen == null ? null : () => widget.onOpen!(span),
-            ),
-            SpanGroupRow(:final spans) => _GroupTile(
-              spans: spans,
-              trace: trace,
-              total: total,
-              now: now,
-              inset: widget.inset,
-              tools: widget.tools,
-              expanded: _expanded.contains(spans.first.seq),
-              onToggle: () => setState(() {
-                if (!_expanded.remove(spans.first.seq)) {
-                  _expanded.add(spans.first.seq);
-                }
-              }),
-              onOpen: widget.onOpen,
-            ),
-          },
-      ],
+      children: [for (final row in rows) _buildRow(row, trace, total, now)],
     );
+    if (widget.controller == null) return column;
+    return SingleChildScrollView(controller: widget.controller, padding: widget.padding, child: column);
   }
 }
 

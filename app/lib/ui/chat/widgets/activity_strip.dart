@@ -115,7 +115,7 @@ class _ActivityStripSlotState extends ConsumerState<ActivityStripSlot> with Sing
         // The chat page's pet stands on the strip: one mascot a screen, so
         // the whale tail steps aside while it does.
         final perches = PetPerchScope.maybeOf(context);
-        return AnimatedBuilder(
+        final built = AnimatedBuilder(
           animation: _height,
           builder: (context, child) => Align(alignment: Alignment.topCenter, heightFactor: _height.value, child: child),
           child: Padding(
@@ -137,6 +137,7 @@ class _ActivityStripSlotState extends ConsumerState<ActivityStripSlot> with Sing
             ),
           ),
         );
+        return AppBackdrop.snapshotCaching ? RepaintBoundary(child: built) : built;
       },
     );
   }
@@ -255,15 +256,18 @@ class _ActivityStripState extends State<ActivityStrip> {
                       ),
                     ),
                   Expanded(
-                    child: LiveElapsed(
-                      since: a.turnStart ?? a.since,
-                      skew: a.skew,
-                      builder: (context, elapsed) => _Line(
-                        activity: a,
-                        elapsed: elapsed,
-                        stats: _statsTimer == null ? null : _stats(a, widget.tokensPerSecond?.call() ?? 0),
-                      ),
-                    ),
+                    child: () {
+                      final line = LiveElapsed(
+                        since: a.turnStart ?? a.since,
+                        skew: a.skew,
+                        builder: (context, elapsed) => _Line(
+                          activity: a,
+                          elapsed: elapsed,
+                          stats: _statsTimer == null ? null : _stats(a, widget.tokensPerSecond?.call() ?? 0),
+                        ),
+                      );
+                      return AppBackdrop.snapshotCaching ? RepaintBoundary(child: line) : line;
+                    }(),
                   ),
                   if (widget.todoProgress && a.todoTotal > 0) ...[
                     Container(

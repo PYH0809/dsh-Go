@@ -171,17 +171,24 @@ class _ChatListState extends ConsumerState<ChatList> with SingleTickerProviderSt
 
   /// EditableText's reveal request includes its caret padding. The centered
   /// viewport's getOffsetToReveal omits the anchor, so use the actual rectangle
-  /// in this viewport instead. Other reveal requests keep Flutter's behavior.
+  /// in this viewport instead. Read-only SelectableText collapsed taps in tool
+  /// wells or notices must never jump the message list, while non-collapsed
+  /// selection-handle drags still reveal through the anchor-aware calculation.
   bool _revealInlineEditor(RenderObject target, Rect? rect, Duration duration, Curve curve) {
     final focus = FocusManager.instance.primaryFocus?.context;
     if (focus == null || !focus.mounted || focus.findAncestorStateOfType<_ChatListState>() != this) return false;
     final editor = focus.findAncestorStateOfType<EditableTextState>();
-    if (editor == null || editor.widget.readOnly) return false;
+    if (editor == null) return false;
     RenderObject? ancestor = editor.renderEditable;
     while (ancestor != null && ancestor != target) {
       ancestor = ancestor.parent;
     }
-    if (ancestor == null || !_scroll.hasClients) return false;
+    if (ancestor == null) return false;
+    if (!_scroll.hasClients) return true;
+    // Tapping a read-only SelectableText places a collapsed hidden caret and
+    // calls showOnScreen(). Swallow collapsed taps so the list stays still,
+    // while allowing non-collapsed selection-handle drags to reveal cleanly!
+    if (editor.widget.readOnly && editor.textEditingValue.selection.isCollapsed) return true;
     final viewport = _centerKey.currentContext?.findRenderObject()?.parent;
     if (viewport is! RenderViewport || !viewport.hasSize) return false;
     final position = _scroll.position;
@@ -1051,8 +1058,8 @@ class _ChatListState extends ConsumerState<ChatList> with SingleTickerProviderSt
       rise: row is UserRow || row is PendingRow,
       child: _rowWidget(row),
     );
-    return KeyedSubtree(
-      key: ValueKey<String>(row.key),
+    final inner = _InlineEditorReveal(
+      onShow: _revealInlineEditor,
       child: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: AppSpace.readingWidth),
@@ -1068,6 +1075,10 @@ class _ChatListState extends ConsumerState<ChatList> with SingleTickerProviderSt
               : Container(width: double.infinity, padding: padding, child: body),
         ),
       ),
+    );
+    return KeyedSubtree(
+      key: ValueKey<String>(row.key),
+      child: AppBackdrop.snapshotCaching ? RepaintBoundary(child: inner) : inner,
     );
   }
 
@@ -1442,10 +1453,7 @@ class _ChatListState extends ConsumerState<ChatList> with SingleTickerProviderSt
       ArtifactCardRow(:final group) => ArtifactCard(sessionId: widget.sessionId, group: group),
       CommandNoticeRow(:final notice) => CommandRow(notice: notice),
       ApprovalRow(:final request) => ApprovalCard(request: request, onRespond: _respond, onAllowAll: _allowAll),
-      QuestionRow(:final request) => _InlineEditorReveal(
-        onShow: _revealInlineEditor,
-        child: QuestionCard(request: request, onAnswer: _answer, onReject: _rejectQuestion),
-      ),
+      QuestionRow(:final request) => QuestionCard(request: request, onAnswer: _answer, onReject: _rejectQuestion),
     };
   }
 }

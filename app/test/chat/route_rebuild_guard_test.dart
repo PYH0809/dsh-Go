@@ -202,4 +202,19 @@ void main() {
     expect(lease.released, isTrue);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('upright IME keyboard animation does not rebuild ChatScreen or ChatList', (tester) async {
+    addTearDown(tester.view.resetViewInsets);
+    await _pump(tester);
+    final dpr = tester.view.devicePixelRatio;
+    final rising = await _builds(() async {
+      for (var step = 1; step <= 8; step++) {
+        tester.view.viewInsets = FakeViewPadding(bottom: 32.0 * step * dpr);
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+    });
+    expect(rising, isEmpty, reason: 'upright IME rise only rebuilds Composer, never ChatScreen or ChatList');
+    await tester.pumpWidget(const SizedBox.shrink());
+    expect(tester.takeException(), isNull);
+  });
 }
