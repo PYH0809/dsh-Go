@@ -21,8 +21,8 @@ python3 -I runtime/lib/input_store.py inventory --all-locks > runtime-inputs-all
 
 ```sh
 python3 -I runtime/lib/input_store.py import --store /absolute/input-store \
-  /absolute/recovered/proot_5.1.107.98_aarch64.deb \
-  /absolute/recovered/proot_5.1.107.98_x86_64.deb
+  /absolute/recovered/proot_5.1.107.102_aarch64.deb \
+  /absolute/recovered/proot_5.1.107.102_x86_64.deb
 python3 -I runtime/lib/input_store.py collect --store /absolute/input-store
 python3 -I runtime/lib/input_store.py verify --store /absolute/input-store
 ```
