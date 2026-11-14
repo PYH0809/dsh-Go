@@ -178,27 +178,38 @@ class _DockStackState extends ConsumerState<DockStack> with TickerProviderStateM
       _spread.forward();
     }
     final accessory = widget.accessory;
+    final parentSampling = GlassBackdropScope.enabledOf(context);
     final layout = AnimatedBuilder(
       animation: Listenable.merge([_curve, _turn]),
-      builder: (context, _) => _DockStackLayout(
-        spread: _curve.value,
-        turn: _turn.value,
-        hasAccessory: accessory != null,
-        onShown: _onShown,
-        children: [
-          // Folded, the deck takes the tap: the cards neither answer it nor read out.
-          for (final card in widget.cards)
-            IgnorePointer(
-              ignoring: folded,
-              child: ExcludeSemantics(excluding: folded, child: card),
-            ),
-          ?accessory,
-          ExcludeSemantics(
-            excluding: !deck || folded,
-            child: _FoldButton(onTap: () => _fold(true)),
+      builder: (context, _) {
+        // Suspend BackdropFilter readbacks while cards overlap and translate
+        // with fractional opacity (`_spread` / `_turn`), which otherwise blends
+        // into gray rectangular artifacts on Impeller OpenGLES; exact endpoints
+        // restore live sampling seamlessly.
+        final moving = (_spread.value > 0 && _spread.value < 1) || _turn.value != _turn.value.roundToDouble();
+        return GlassBackdropScope(
+          enabled: parentSampling && !moving,
+          child: _DockStackLayout(
+            spread: _curve.value,
+            turn: _turn.value,
+            hasAccessory: accessory != null,
+            onShown: _onShown,
+            children: [
+              // Folded, the deck takes the tap: the cards neither answer it nor read out.
+              for (final card in widget.cards)
+                IgnorePointer(
+                  ignoring: folded,
+                  child: ExcludeSemantics(excluding: folded, child: card),
+                ),
+              ?accessory,
+              ExcludeSemantics(
+                excluding: !deck || folded,
+                child: _FoldButton(onTap: () => _fold(true)),
+              ),
+            ],
           ),
-        ],
-      ),
+        );
+      },
     );
     // One shape folded or spread, only the callbacks change: a different
     // parent would mount the cards afresh and replay their rise.

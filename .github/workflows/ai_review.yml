@@ -72,6 +72,7 @@ jobs:
           persist-credentials: false
 
       - name: Collect PR diff and review history
+        id: collect
         if: env.HAS_KEY == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -80,6 +81,9 @@ jobs:
           mkdir -p .ai-review
           gh pr view "$PR" --repo "$REPO" --json number,title,body,author,baseRefName,headRefName > .ai-review/pr.json
           gh pr diff "$PR" --repo "$REPO" > .ai-review/diff.patch
+          patch_id=$(git patch-id --stable < .ai-review/diff.patch | awk '{print $1}')
+          [ -z "$patch_id" ] && patch_id=$(sha256sum .ai-review/diff.patch | awk '{print $1}')
+          echo "patch_id=$patch_id" >> "$GITHUB_OUTPUT"
           gh api graphql --paginate -F owner="${REPO%/*}" -F name="${REPO#*/}" -F number="$PR" -f query='
             query($owner: String!, $name: String!, $number: Int!, $endCursor: String) {
               repository(owner: $owner, name: $name) {
@@ -100,6 +104,12 @@ jobs:
             --jq '.[] | {user: .user.login, author_association, created_at, body}' > .ai-review/comments.json
           gh api "repos/$REPO/pulls/$PR/reviews" --paginate \
             --jq '.[] | {user: .user.login, author_association, state, commit_id, body}' > .ai-review/reviews.json
+          if [ "${{ github.event_name }}" != "workflow_dispatch" ] && grep -q "ai-review-patch-id:${patch_id}" .ai-review/reviews.json; then
+            echo "Pure rebase detected (patch-id $patch_id unchanged since prior AI review); skipping LLM call to save tokens."
+            echo "skip_unchanged=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip_unchanged=false" >> "$GITHUB_OUTPUT"
+          fi
           cat <<'SCHEMA' > .ai-review/schema.json
           {"type":"object","additionalProperties":false,"required":["verdict","summary","findings"],"properties":{"verdict":{"type":"string","enum":["blocking","suggestions","clean"]},"summary":{"type":"string"},"findings":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["path","line","severity","title","body"],"properties":{"path":{"type":"string"},"line":{"type":"integer"},"severity":{"type":"string","enum":["high","medium","low"]},"title":{"type":"string"},"body":{"type":"string"}}}}}}
           SCHEMA
@@ -107,7 +117,7 @@ jobs:
 
       - name: Review with Claude Code via OpenRouter
         id: claude
-        if: env.HAS_KEY == 'true'
+        if: env.HAS_KEY == 'true' && steps.collect.outputs.skip_unchanged != 'true'
         uses: anthropics/claude-code-action@4d75e5f390ee76b2e09c1980ecc99ff3a2e088c8 # v1
         env:
           ANTHROPIC_BASE_URL: https://openrouter.ai/api
@@ -156,12 +166,13 @@ jobs:
             - `summary`：2–5 句中文总结本 PR 的核心改动、风险面与审查结论。
 
       - name: Post GitHub Pull Request Review
-        if: env.HAS_KEY == 'true'
+        if: env.HAS_KEY == 'true' && steps.collect.outputs.skip_unchanged != 'true'
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         env:
           STRUCTURED_OUTPUT: ${{ steps.claude.outputs.structured_output }}
           EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
           HEAD_SHA: ${{ steps.head.outputs.sha }}
+          PATCH_ID: ${{ steps.collect.outputs.patch_id }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         with:
           script: |
@@ -280,7 +291,7 @@ jobs:
               credit.push(`约 $${totalCostUsd.toFixed(totalCostUsd < 0.1 ? 4 : 2)}`);
             }
             if (left) credit.push(left);
-            const footer = ['', '---', `_${credit.join(' · ')}_`];
+            const footer = ['', '---', `_${credit.join(' · ')}_`, `<!-- ai-review-patch-id:${process.env.PATCH_ID} -->`];
 
             const review = {
               owner: context.repo.owner,
