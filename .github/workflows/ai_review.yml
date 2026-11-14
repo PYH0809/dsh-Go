@@ -19,7 +19,7 @@ on:
         required: true
         type: number
       model:
-        description: "OpenRouter 模型（默认 anthropic/claude-sonnet-4.6）"
+        description: "OpenRouter 模型（默认 anthropic/claude-sonnet-5.5）"
         required: false
         type: string
         default: ""
@@ -42,7 +42,7 @@ jobs:
       issues: read
     env:
       HAS_KEY: ${{ secrets.OPENROUTER_API_KEY != '' }}
-      MODEL: ${{ inputs.model || vars.AI_REVIEW_MODEL || 'anthropic/claude-sonnet-4.6' }}
+      MODEL: ${{ inputs.model || vars.AI_REVIEW_MODEL || 'anthropic/claude-sonnet-5.5' }}
       PR: ${{ github.event.pull_request.number || inputs.pr }}
     steps:
       - name: Skip without OPENROUTER_API_KEY
