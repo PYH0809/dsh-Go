@@ -80,8 +80,9 @@ class ComposerTray extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
+    final dpr = MediaQuery.devicePixelRatioOf(context);
     final images = items.where((a) => a.isImage).toList();
-    final gallery = _draftGallery(images);
+    final gallery = _draftGallery(images, thumbSize: const Size.square(56), dpr: dpr);
     return SizedBox(
       height: height,
       child: ListView.separated(
@@ -118,9 +119,20 @@ class ComposerTray extends StatelessWidget {
   }
 }
 
-List<ViewerImage> _draftGallery(Iterable<DraftAttachment> images) => [
+ImageProvider _thumbProvider(ImageProvider image, Size? size, double dpr) =>
+    ResizeImage(image, width: ((size?.width ?? _singleMax) * dpr).round(), policy: ResizeImagePolicy.fit);
+
+List<ViewerImage> _draftGallery(Iterable<DraftAttachment> images, {required Size? thumbSize, required double dpr}) => [
   for (final image in images)
-    ViewerImage(name: image.name, image: MemoryImage(image.bytes), heroTag: 'draft-${image.id}'),
+    () {
+      final raw = MemoryImage(image.bytes);
+      return ViewerImage(
+        name: image.name,
+        image: raw,
+        preview: _thumbProvider(raw, thumbSize, dpr),
+        heroTag: 'draft-${image.id}',
+      );
+    }(),
 ];
 
 /// How far the remove badge sticks out past a tray tile's corner.
@@ -193,10 +205,11 @@ class SentAttachments extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
+    final dpr = MediaQuery.devicePixelRatioOf(context);
     final draftImages = drafts.where((d) => d.isImage).toList();
-    final gallery = _draftGallery(draftImages);
     // One image shows large at its own aspect; several become a grid of squares.
     final single = draftImages.length + images.length == 1;
+    final gallery = _draftGallery(draftImages, thumbSize: single ? null : const Size.square(88), dpr: dpr);
     final children = <Widget>[
       for (var i = 0; i < draftImages.length; i++)
         _Thumb(
@@ -239,9 +252,8 @@ class _Thumb extends StatelessWidget {
     final l10n = context.l10n;
     final placeholder = Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.06);
     final dpr = MediaQuery.devicePixelRatioOf(context);
-    final decodeWidth = ((size?.width ?? _singleMax) * dpr).round();
     Widget picture = Image(
-      image: ResizeImage(image, width: decodeWidth, policy: ResizeImagePolicy.fit),
+      image: _thumbProvider(image, size, dpr),
       fit: size == null ? BoxFit.contain : BoxFit.cover,
       gaplessPlayback: true,
       frameBuilder: (context, child, frame, sync) =>
@@ -297,14 +309,26 @@ class _SessionImage extends ConsumerWidget {
       // The bubble may unmount while the viewer is open. Its lazy pages must
       // read through the captured container, never a disposed WidgetRef.
       final container = ProviderScope.containerOf(context, listen: false);
+      final dpr = MediaQuery.devicePixelRatioOf(context);
       final gallery = [
-        for (final image in images)
-          ViewerImage.lazy(
-            name: image.name ?? '',
-            heroTag: 'img-$sessionId-${image.attachmentId}',
-            load: () async =>
-                MemoryImage(await container.read(sessionImageProvider((sessionId, image)).future)),
-          ),
+        for (var i = 0; i < images.length; i++)
+          switch (i == index ? container.read(sessionImageProvider((sessionId, images[i]))) : null) {
+            AsyncData(:final value) => () {
+              final raw = MemoryImage(value);
+              return ViewerImage(
+                name: images[i].name ?? '',
+                image: raw,
+                preview: _thumbProvider(raw, box, dpr),
+                heroTag: 'img-$sessionId-${images[i].attachmentId}',
+              );
+            }(),
+            _ => ViewerImage.lazy(
+              name: images[i].name ?? '',
+              heroTag: 'img-$sessionId-${images[i].attachmentId}',
+              load: () async =>
+                  MemoryImage(await container.read(sessionImageProvider((sessionId, images[i])).future)),
+            ),
+          },
       ];
       openAttachmentGallery(context, gallery, initialPage: index);
     }
@@ -520,24 +544,34 @@ class _ImageViewerState extends State<_ImageViewer> {
   );
 
   Widget _picture(BuildContext context, int index) {
-    Widget picture = FutureBuilder<ImageProvider>(
-      future: _image(index),
-      initialData: widget.images[index].image,
-      builder: (context, snapshot) {
-        if (snapshot.hasError) return _placeholder(index, failed: true);
-        final image = snapshot.data;
-        if (image == null) return _placeholder(index);
-        return Center(
-          child: Image(
-            key: ValueKey('attachment-gallery-image-$index'),
-            image: image,
-            fit: BoxFit.contain,
-            errorBuilder: (_, _, _) => _placeholder(index, failed: true),
-          ),
-        );
-      },
+    final item = widget.images[index];
+    final preview = item.preview;
+    Widget buildImage(ImageProvider image) => Center(
+      child: Image(
+        key: ValueKey('attachment-gallery-image-$index'),
+        image: image,
+        fit: BoxFit.contain,
+        gaplessPlayback: true,
+        frameBuilder: preview == null
+            ? null
+            : (context, child, frame, sync) =>
+                  frame != null || sync ? child : Image(image: preview, fit: BoxFit.contain, gaplessPlayback: true),
+        errorBuilder: (_, _, _) => _placeholder(index, failed: true),
+      ),
     );
-    if (widget.images[index].heroTag case final tag?) {
+    Widget picture = switch (item.image) {
+      final image? => buildImage(image),
+      null => FutureBuilder<ImageProvider>(
+        future: _image(index),
+        builder: (context, snapshot) {
+          if (snapshot.hasError) return _placeholder(index, failed: true);
+          final image = snapshot.data;
+          if (image == null) return _placeholder(index);
+          return buildImage(image);
+        },
+      ),
+    };
+    if (item.heroTag case final tag?) {
       picture = Hero(tag: tag, child: picture);
     }
     return picture;

@@ -105,7 +105,7 @@ class QuickPanel extends ConsumerWidget {
         },
       ),
     );
-    return SlidingGlass(motion: motion, tier: GlassTier.sheet, borderRadius: _radius, child: content);
+    return SlidingGlass(motion: motion, tier: GlassTier.sheet, borderRadius: _radius, child: RepaintBoundary(child: content));
   }
 }
 

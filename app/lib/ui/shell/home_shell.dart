@@ -403,44 +403,40 @@ class _HomeShellState extends ConsumerState<HomeShell> with TickerProviderStateM
                       Positioned.fill(
                         // The open drawer and its scrim take the swipe that pushes it
                         // back; closed, nothing here is hit.
-                        child: RepaintBoundary(
-                          child: RawGestureDetector(
-                            behavior: HitTestBehavior.deferToChild,
-                            gestures: _drawerGestures,
-                            child: _DrawerOverlay(
-                              animation: _drawer,
-                              width: width,
-                              drawer: SessionsDrawer(
-                                onClose: _closeDrawer,
-                                onOpen: _openDestination,
-                                identityBarHeight: _identityBar,
-                                drawerMotion: _drawer,
-                                fixedWidth: width,
-                              ),
+                        child: RawGestureDetector(
+                          behavior: HitTestBehavior.deferToChild,
+                          gestures: _drawerGestures,
+                          child: _DrawerOverlay(
+                            animation: _drawer,
+                            width: width,
+                            drawer: SessionsDrawer(
                               onClose: _closeDrawer,
+                              onOpen: _openDestination,
+                              identityBarHeight: _identityBar,
+                              drawerMotion: _drawer,
+                              fixedWidth: width,
                             ),
+                            onClose: _closeDrawer,
                           ),
                         ),
                       ),
                       Positioned.fill(
-                        child: RepaintBoundary(
-                          child: RawGestureDetector(
-                            behavior: HitTestBehavior.deferToChild,
-                            gestures: quickPanelOn ? _quickPanelGestures : const {},
-                            child: _DrawerOverlay(
-                              animation: _quickPanel,
-                              width: _quickPanelWidth(context),
-                              fromRight: true,
-                              drawer: ValueListenableBuilder<bool>(
-                                valueListenable: _quickPanelOpen,
-                                builder: (context, open, _) => QuickPanel(
-                                  motion: _quickPanel,
-                                  onOpen: _openDestination,
-                                  sessionId: open ? sessionId : null,
-                                ),
+                        child: RawGestureDetector(
+                          behavior: HitTestBehavior.deferToChild,
+                          gestures: quickPanelOn ? _quickPanelGestures : const {},
+                          child: _DrawerOverlay(
+                            animation: _quickPanel,
+                            width: _quickPanelWidth(context),
+                            fromRight: true,
+                            drawer: ValueListenableBuilder<bool>(
+                              valueListenable: _quickPanelOpen,
+                              builder: (context, open, _) => QuickPanel(
+                                motion: _quickPanel,
+                                onOpen: _openDestination,
+                                sessionId: open ? sessionId : null,
                               ),
-                              onClose: _closeQuickPanel,
                             ),
+                            onClose: _closeQuickPanel,
                           ),
                         ),
                       ),
@@ -535,9 +531,10 @@ class _SideParallax extends StatelessWidget {
         final uncovered = !AppBackdrop.snapshotCaching || routeCurrent;
         return AnimatedBuilder(
           animation: Listenable.merge([drawer, quickPanel]),
-          // Moving the scrim or this transform must not repaint unchanged chat
-          // chrome. Streaming content still repaints its own boundary normally.
-          child: RepaintBoundary(child: child),
+          // Never wrap `child` in a RepaintBoundary here: ChatScreen's floating
+          // GlassSurface chrome inside `child` must sample the live backdrop, while
+          // ChatList / rows / veil already own inner RepaintBoundaries.
+          child: child,
           builder: (context, child) {
             final panelCovered = drawer.value > 0 || quickPanel.value > 0;
             final suspendCovered = AppBackdrop.snapshotCaching && panelCovered;
@@ -560,7 +557,7 @@ class _SideParallax extends StatelessWidget {
   }
 }
 
-class _DrawerOverlay extends StatefulWidget {
+class _DrawerOverlay extends StatelessWidget {
   const _DrawerOverlay({
     required this.animation,
     required this.width,
@@ -576,47 +573,27 @@ class _DrawerOverlay extends StatefulWidget {
   final bool fromRight;
 
   @override
-  State<_DrawerOverlay> createState() => _DrawerOverlayState();
-}
-
-class _DrawerOverlayState extends State<_DrawerOverlay> {
-  final _snapshot = SnapshotController();
-
-  @override
-  void dispose() {
-    _snapshot.dispose();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
     final scrim = DshSurfaces.of(context).scrim;
     return Builder(
       builder: (context) {
         final routeCurrent = ModalRoute.of<Object?>(context)?.isCurrent ?? true;
-        final routeActive = TickerMode.valuesOf(context).enabled;
         final uncovered = !AppBackdrop.snapshotCaching || routeCurrent;
         final parentSampling = GlassBackdropScope.enabledOf(context);
         final parentAnimations = GlassBackdropScope.animationsEnabledOf(context);
+        // Never wrap `drawer` in a RepaintBoundary or SnapshotWidget outside its
+        // SlidingGlass / GlassSurface: an ancestor RepaintBoundary isolates
+        // BackdropFilter into an empty offscreen layer on Impeller OpenGLES.
+        // Instead, SessionsDrawer and QuickPanel isolate their inner content
+        // inside GlassSurface.child while SlidingGlass suspends blur during motion.
         return GlassBackdropScope(
           enabled: parentSampling && uncovered,
           animationsEnabled: parentAnimations && uncovered,
           child: AnimatedBuilder(
-            animation: widget.animation,
-            child: SnapshotWidget(
-              controller: _snapshot,
-              child: RepaintBoundary(child: widget.drawer),
-            ),
+            animation: animation,
+            child: drawer,
             builder: (context, drawer) {
-              final progress = widget.animation.value;
-              // Snapshot the drawer only while a modal sheet covers the open
-              // drawer (`!routeCurrent`), avoiding a single-frame texture
-              // capture spike on the first moving slide frame.
-              final snap = AppBackdrop.snapshotCaching && routeActive && progress > 0 && !routeCurrent;
-              if (_snapshot.allowSnapshotting != snap) {
-                _snapshot.allowSnapshotting = snap;
-                if (!snap) _snapshot.clear();
-              }
+              final progress = animation.value;
               return Stack(
                 fit: StackFit.expand,
                 children: [
@@ -624,7 +601,7 @@ class _DrawerOverlayState extends State<_DrawerOverlay> {
                     child: IgnorePointer(
                       ignoring: progress == 0,
                       child: GestureDetector(
-                        onTap: widget.onClose,
+                        onTap: onClose,
                         child: ColoredBox(color: scrim.withValues(alpha: scrim.a * progress)),
                       ),
                     ),
@@ -632,16 +609,16 @@ class _DrawerOverlayState extends State<_DrawerOverlay> {
                   // 面板位置用 Transform 走(paint-only):每帧改 Positioned.left 会让
                   // Stack 和整块抽屉重新布局,拖动时白白多一层成本。
                   Positioned(
-                    left: widget.fromRight ? null : 0,
-                    right: widget.fromRight ? 0 : null,
+                    left: fromRight ? null : 0,
+                    right: fromRight ? 0 : null,
                     top: 0,
                     bottom: 0,
-                    width: widget.width,
+                    width: width,
                     child: Visibility(
                       visible: progress > 0,
                       maintainState: true,
                       child: Transform.translate(
-                        offset: Offset((progress - 1) * (widget.width + 24) * (widget.fromRight ? -1 : 1), 0),
+                        offset: Offset((progress - 1) * (width + 24) * (fromRight ? -1 : 1), 0),
                         child: drawer!,
                       ),
                     ),

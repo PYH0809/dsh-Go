@@ -117,7 +117,7 @@ class _ActivityStripSlotState extends ConsumerState<ActivityStripSlot> with Sing
         // The chat page's pet stands on the strip: one mascot a screen, so
         // the whale tail steps aside while it does.
         final perches = PetPerchScope.maybeOf(context);
-        final built = AnimatedBuilder(
+        return AnimatedBuilder(
           animation: _height,
           builder: (context, child) => Align(alignment: Alignment.topCenter, heightFactor: _height.value, child: child),
           child: Padding(
@@ -139,7 +139,6 @@ class _ActivityStripSlotState extends ConsumerState<ActivityStripSlot> with Sing
             ),
           ),
         );
-        return AppBackdrop.snapshotCaching ? RepaintBoundary(child: built) : built;
       },
     );
   }

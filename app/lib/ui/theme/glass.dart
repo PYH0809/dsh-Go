@@ -1,8 +1,6 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
-import 'package:flutter/scheduler.dart';
 
 import '../common/pressable.dart';
 import '../common/ui_trace.dart';
@@ -133,11 +131,6 @@ class GlassSurface extends StatelessWidget {
 
   bool get _isStadium => stadium || (!circle && borderRadius == null && tier == GlassTier.pill);
 
-  /// Whether rectangular/stadium `sheet` and `chrome` outer shadows cache into
-  /// GPU textures via [SnapshotWidget]. Disabled in `flutter_test_config.dart`
-  /// so existing vector golden images match without ±1 LSB 8-bit quantization.
-  static bool shadowCaching = true;
-
   ShapeBorder get _shape {
     if (circle) return const CircleBorder();
     if (_isStadium) return const StadiumBorder();
@@ -195,56 +188,29 @@ class GlassSurface extends StatelessWidget {
       // Grouped filters must resolve to identical parameters across siblings so
       // Impeller's BackdropGroup collapses them into a single blur pass instead
       // of running 3n separate offscreen passes per frame.
-      final config = _filterFor(s.blurs ? s.blurSigma : 14, s.saturation, bounded: !grouped || !shadowCaching);
+      final config = _filterFor(s.blurs ? s.blurSigma : 14, s.saturation, bounded: !grouped);
       // Keep the filter and content mounted while a moving ancestor suspends
       // sampling. Inserting/removing it would reset unkeyed content State.
       final sampling = sampleBackdrop && settled != 0;
       content = grouped
           ? BackdropFilter.grouped(filterConfig: config, enabled: sampling, child: content)
           : BackdropFilter(filterConfig: config, enabled: sampling, child: content);
-      content = _clip(content, fastRRect: shadowCaching && tier == GlassTier.sheet);
+      content = _clip(content);
     }
 
     if (s.shadows.isNotEmpty) {
-      if ((tier == GlassTier.sheet || tier == GlassTier.chrome) && !circle && shadowCaching) {
-        // Cache only the static shadow on rectangular/pill chrome & sheet panels
-        // (small 44dp circular buttons draw directly via CustomPaint). Impeller
-        // does not raster-cache a RepaintBoundary on all backends. Include the
-        // outer shadow in the snapshot's size so the image cannot cut it off.
-        final extent = _GlassShadowPainter.extentOf(s.shadows);
-        content = _ShadowStack(
-          extent: extent,
-          shadow: IgnorePointer(
-            child: RepaintBoundary(
-              child: _CachedGlassShadow(
-                painter: _GlassShadowPainter(
-                  shape: shape,
-                  shadows: s.shadows,
-                  textDirection: textDirection,
-                  inset: extent,
-                ),
-              ),
-            ),
-          ),
-          child: content,
-        );
-      } else {
-        content = CustomPaint(
-          painter: _GlassShadowPainter(shape: shape, shadows: s.shadows, textDirection: textDirection),
-          child: content,
-        );
-      }
+      content = CustomPaint(
+        painter: _GlassShadowPainter(shape: shape, shadows: s.shadows, textDirection: textDirection),
+        child: content,
+      );
     }
     return content;
   }
 
-  Widget _clip(Widget child, {bool fastRRect = false}) {
+  Widget _clip(Widget child) {
     if (circle) return ClipOval(child: child);
     if (_isStadium) {
       return ClipRRect(borderRadius: const BorderRadius.all(Radius.circular(999)), child: child);
-    }
-    if (fastRRect) {
-      return ClipRRect(borderRadius: _radius, child: child);
     }
     return ClipRSuperellipse(borderRadius: _radius, child: child);
   }
@@ -266,327 +232,6 @@ class GlassSurface extends StatelessWidget {
       r, g, b + s, 0, 0, //
       0, 0, 0, 1, 0, //
     ];
-  }
-}
-
-class _ShadowStack extends RenderObjectWidget {
-  const _ShadowStack({required this.extent, required this.shadow, required this.child});
-
-  final double extent;
-  final Widget shadow;
-  final Widget child;
-
-  @override
-  RenderObjectElement createElement() => _ShadowStackElement(this);
-
-  @override
-  RenderObject createRenderObject(BuildContext context) => _RenderShadowStack(extent);
-
-  @override
-  void updateRenderObject(BuildContext context, _RenderShadowStack renderObject) => renderObject.extent = extent;
-}
-
-class _ShadowStackElement extends RenderObjectElement {
-  _ShadowStackElement(_ShadowStack super.widget);
-
-  Element? _shadow;
-  Element? _child;
-
-  @override
-  _ShadowStack get widget => super.widget as _ShadowStack;
-
-  @override
-  _RenderShadowStack get renderObject => super.renderObject as _RenderShadowStack;
-
-  @override
-  void visitChildren(ElementVisitor visitor) {
-    if (_shadow != null) visitor(_shadow!);
-    if (_child != null) visitor(_child!);
-  }
-
-  @override
-  void forgetChild(Element child) {
-    if (child == _shadow) _shadow = null;
-    if (child == _child) _child = null;
-    super.forgetChild(child);
-  }
-
-  @override
-  void mount(Element? parent, Object? newSlot) {
-    super.mount(parent, newSlot);
-    _shadow = updateChild(_shadow, widget.shadow, 0);
-    _child = updateChild(_child, widget.child, 1);
-  }
-
-  @override
-  void update(_ShadowStack newWidget) {
-    super.update(newWidget);
-    _shadow = updateChild(_shadow, widget.shadow, 0);
-    _child = updateChild(_child, widget.child, 1);
-  }
-
-  @override
-  void insertRenderObjectChild(RenderBox child, int slot) {
-    if (slot == 0) {
-      renderObject.shadow = child;
-    } else {
-      renderObject.child = child;
-    }
-  }
-
-  @override
-  void moveRenderObjectChild(RenderBox child, int oldSlot, int newSlot) {}
-
-  @override
-  void removeRenderObjectChild(RenderBox child, int slot) {
-    if (slot == 0) {
-      if (renderObject.shadow == child) renderObject.shadow = null;
-    } else {
-      if (renderObject.child == child) renderObject.child = null;
-    }
-  }
-}
-
-class _RenderShadowStack extends RenderBox {
-  _RenderShadowStack(this._extent);
-
-  double _extent;
-  set extent(double value) {
-    if (_extent == value) return;
-    _extent = value;
-    markNeedsLayout();
-  }
-
-  RenderBox? _shadow;
-  RenderBox? get shadow => _shadow;
-  set shadow(RenderBox? value) {
-    if (_shadow == value) return;
-    if (_shadow != null) dropChild(_shadow!);
-    _shadow = value;
-    if (_shadow != null) {
-      _shadow!.parentData = BoxParentData();
-      adoptChild(_shadow!);
-    }
-  }
-
-  RenderBox? _child;
-  RenderBox? get child => _child;
-  set child(RenderBox? value) {
-    if (_child == value) return;
-    if (_child != null) dropChild(_child!);
-    _child = value;
-    if (_child != null) {
-      _child!.parentData = BoxParentData();
-      adoptChild(_child!);
-    }
-  }
-
-  @override
-  void attach(PipelineOwner owner) {
-    super.attach(owner);
-    _shadow?.attach(owner);
-    _child?.attach(owner);
-  }
-
-  @override
-  void detach() {
-    super.detach();
-    _shadow?.detach();
-    _child?.detach();
-  }
-
-  @override
-  void visitChildren(RenderObjectVisitor visitor) {
-    if (_shadow != null) visitor(_shadow!);
-    if (_child != null) visitor(_child!);
-  }
-
-  @override
-  void redepthChildren() {
-    if (_shadow != null) redepthChild(_shadow!);
-    if (_child != null) redepthChild(_child!);
-  }
-
-  @override
-  double computeMinIntrinsicWidth(double height) => _child?.getMinIntrinsicWidth(height) ?? 0;
-
-  @override
-  double computeMaxIntrinsicWidth(double height) => _child?.getMaxIntrinsicWidth(height) ?? 0;
-
-  @override
-  double computeMinIntrinsicHeight(double width) => _child?.getMinIntrinsicHeight(width) ?? 0;
-
-  @override
-  double computeMaxIntrinsicHeight(double width) => _child?.getMaxIntrinsicHeight(width) ?? 0;
-
-  @override
-  double? computeDistanceToActualBaseline(TextBaseline baseline) => _child?.getDistanceToActualBaseline(baseline);
-
-  @override
-  double? computeDryBaseline(covariant BoxConstraints constraints, TextBaseline baseline) =>
-      _child?.getDryBaseline(constraints, baseline);
-
-  @override
-  Size computeDryLayout(BoxConstraints constraints) => _child?.getDryLayout(constraints) ?? constraints.smallest;
-
-  @override
-  void applyPaintTransform(RenderBox child, Matrix4 transform) {
-    final offset = (child.parentData! as BoxParentData).offset;
-    transform.translateByDouble(offset.dx, offset.dy, 0, 1);
-  }
-
-  @override
-  void performLayout() {
-    final c = _child;
-    if (c == null) {
-      size = constraints.smallest;
-      return;
-    }
-    c.layout(constraints, parentUsesSize: true);
-    size = c.size;
-    (c.parentData! as BoxParentData).offset = Offset.zero;
-    final s = _shadow;
-    if (s != null) {
-      s.layout(BoxConstraints.tight(Size(size.width + 2 * _extent, size.height + 2 * _extent)));
-      (s.parentData! as BoxParentData).offset = Offset(-_extent, -_extent);
-    }
-  }
-
-  @override
-  bool hitTestChildren(BoxHitTestResult result, {required Offset position}) =>
-      _child?.hitTest(result, position: position) ?? false;
-
-  @override
-  void paint(PaintingContext context, Offset offset) {
-    final s = _shadow;
-    if (s != null) context.paintChild(s, offset + (s.parentData! as BoxParentData).offset);
-    final c = _child;
-    if (c != null) context.paintChild(c, offset);
-  }
-}
-
-/// Caches the outer glass shadow into a single [SnapshotWidget] texture at rest,
-/// and suspends texture allocation during consecutive resize frames while still
-/// painting the shadow directly via [CustomPaint] (no shadow flicker):
-/// - Set: [_RenderShadowResizeGate.performLayout] detects when `constraints.biggest`
-///   changes after initial layout, immediately sets `allowSnapshotting = false`
-///   (`markNeedsPaint()` is completely legal during layout on both Skia & Impeller,
-///   unlike `markNeedsBuild()` or mutating during `paint`), and calls [onResize].
-/// - Cleared: a two-frame idle post-frame callback clears `_resizing = false` once
-///   a full frame passes without another size change, recapturing 1 texture at rest.
-class _CachedGlassShadow extends StatefulWidget {
-  const _CachedGlassShadow({required this.painter});
-
-  final _GlassShadowPainter painter;
-
-  @override
-  State<_CachedGlassShadow> createState() => _CachedGlassShadowState();
-}
-
-class _CachedGlassShadowState extends State<_CachedGlassShadow> {
-  final _controller = SnapshotController(allowSnapshotting: true);
-  bool _resizing = false;
-  int _settledTicket = 0;
-
-  void _sync() {
-    final active = !_resizing && TickerMode.valuesOf(context).enabled;
-    if (_controller.allowSnapshotting != active) {
-      _controller.allowSnapshotting = active;
-      if (!active) _controller.clear();
-    }
-  }
-
-  void _onLayoutResize() {
-    _resizing = true;
-    final ticket = ++_settledTicket;
-    SchedulerBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || ticket != _settledTicket) return;
-      SchedulerBinding.instance.addPostFrameCallback((_) {
-        if (!mounted || ticket != _settledTicket) return;
-        _resizing = false;
-        _sync();
-      });
-      SchedulerBinding.instance.ensureVisualUpdate();
-    });
-  }
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    _sync();
-  }
-
-  @override
-  void didUpdateWidget(_CachedGlassShadow oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (widget.painter.shouldRepaint(oldWidget.painter)) _controller.clear();
-    _sync();
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) => _ShadowResizeGate(
-    controller: _controller,
-    onLayoutResize: _onLayoutResize,
-    child: SnapshotWidget(
-      controller: _controller,
-      // SnapshotWidget also invalidates its image when MediaQuery's DPR changes.
-      autoresize: true,
-      child: CustomPaint(painter: widget.painter),
-    ),
-  );
-}
-
-class _ShadowResizeGate extends SingleChildRenderObjectWidget {
-  const _ShadowResizeGate({
-    required this.controller,
-    required this.onLayoutResize,
-    required super.child,
-  });
-
-  final SnapshotController controller;
-  final VoidCallback onLayoutResize;
-
-  @override
-  RenderObject createRenderObject(BuildContext context) =>
-      _RenderShadowResizeGate(controller, onLayoutResize);
-
-  @override
-  void updateRenderObject(BuildContext context, _RenderShadowResizeGate renderObject) {
-    renderObject
-      ..controller = controller
-      ..onLayoutResize = onLayoutResize;
-  }
-}
-
-class _RenderShadowResizeGate extends RenderProxyBox {
-  _RenderShadowResizeGate(this.controller, this.onLayoutResize);
-
-  SnapshotController controller;
-  VoidCallback onLayoutResize;
-  Size? _lastLaidOutSize;
-
-  @override
-  void performLayout() {
-    final next = constraints.biggest;
-    final previous = _lastLaidOutSize;
-    _lastLaidOutSize = next;
-    if (previous != null && previous != next) {
-      // Legal during performLayout: SnapshotController only calls markNeedsPaint()
-      // on _RenderSnapshotWidget (never markNeedsBuild), preventing intermediate
-      // texture allocation on this exact frame while CustomPaint draws directly!
-      if (controller.allowSnapshotting) {
-        controller.allowSnapshotting = false;
-        controller.clear();
-      }
-      onLayoutResize();
-    }
-    super.performLayout();
   }
 }
 
@@ -646,28 +291,23 @@ class _GlassEdgePainter extends CustomPainter {
 
 /// 只在形状外部画的投影。
 class _GlassShadowPainter extends CustomPainter {
-  _GlassShadowPainter({required this.shape, required this.shadows, required this.textDirection, this.inset = 0});
+  _GlassShadowPainter({required this.shape, required this.shadows, required this.textDirection});
 
   final ShapeBorder shape;
   final List<BoxShadow> shadows;
   final TextDirection? textDirection;
-  final double inset;
 
-  static double extentOf(List<BoxShadow> shadows) {
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (size.isEmpty) return;
+    final rect = Offset.zero & size;
     var extent = 0.0;
     for (final s in shadows) {
       extent = math.max(extent, s.blurRadius * 2 + s.spreadRadius.abs() + s.offset.distance);
     }
-    return extent + 2;
-  }
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final rect = (Offset.zero & size).deflate(inset);
-    if (rect.isEmpty) return;
     final outside = Path()
       ..fillType = PathFillType.evenOdd
-      ..addRect(rect.inflate(extentOf(shadows)))
+      ..addRect(rect.inflate(extent + 2))
       ..addPath(shape.getOuterPath(rect, textDirection: textDirection), Offset.zero);
     canvas.save();
     canvas.clipPath(outside);
@@ -683,7 +323,6 @@ class _GlassShadowPainter extends CustomPainter {
   @override
   bool shouldRepaint(_GlassShadowPainter old) =>
       old.shape != shape ||
-      old.inset != inset ||
       !_sameShadows(old.shadows, shadows) ||
       old.textDirection != textDirection;
 

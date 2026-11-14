@@ -1,41 +1,19 @@
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
+import 'package:dsh_app/ui/chat/chat_screen.dart';
+import 'package:dsh_app/ui/common/app_sheet.dart';
+import 'package:dsh_app/ui/shell/home_shell.dart';
 import 'package:dsh_app/ui/theme/theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
-class _ContentPainter extends CustomPainter {
-  _ContentPainter(this.frame, this.paints);
+import '../chat/support/harness.dart';
+import '../shell/adaptive/support.dart';
 
-  final int frame;
-  final List<int> paints;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    paints.add(frame);
-    canvas.drawRect(Offset.zero & size, Paint()..color = frame.isEven ? Colors.blue : Colors.red);
-  }
-
-  @override
-  bool shouldRepaint(_ContentPainter old) => old.frame != frame;
-}
-
-final _shadowBoundary = find.descendant(of: find.byType(GlassSurface), matching: find.byType(RepaintBoundary));
-final _shadowSnapshot = find.descendant(of: find.byType(GlassSurface), matching: find.byType(SnapshotWidget));
 const _captureKey = ValueKey('capture');
-
-List<ui.Image> _watchImages() {
-  final images = <ui.Image>[];
-  final previous = ui.Image.onCreate;
-  ui.Image.onCreate = (image) {
-    images.add(image);
-    previous?.call(image);
-  };
-  addTearDown(() => ui.Image.onCreate = previous);
-  return images;
-}
 
 Future<Uint8List> _pixels(WidgetTester tester) async {
   final boundary = tester.renderObject<RenderRepaintBoundary>(find.byKey(_captureKey));
@@ -49,184 +27,30 @@ Future<Uint8List> _pixels(WidgetTester tester) async {
   }))!;
 }
 
-void main() {
-  setUp(() => GlassSurface.shadowCaching = true);
-  tearDown(() => GlassSurface.shadowCaching = false);
-
-  for (final tier in [GlassTier.sheet, GlassTier.chrome]) {
-    testWidgets('$tier content and fill repaint without repainting its shadow', (tester) async {
-      final oldDisableShadows = debugDisableShadows;
-      debugDisableShadows = false;
-      try {
-        final frame = ValueNotifier(0);
-        addTearDown(frame.dispose);
-        final paints = <int>[];
-        final images = _watchImages();
-        await tester.pumpWidget(
-          MaterialApp(
-            theme: buildLightTheme(),
-            home: Center(
-              child: ValueListenableBuilder<int>(
-                valueListenable: frame,
-                builder: (context, value, _) => GlassSurface(
-                  tier: tier,
-                  settled: value / 10,
-                  child: SizedBox(width: 120, height: 140, child: CustomPaint(painter: _ContentPainter(value, paints))),
-                ),
-              ),
-            ),
-          ),
-        );
-        expect(_shadowBoundary, findsOneWidget);
-        final boundary = tester.renderObject<RenderRepaintBoundary>(_shadowBoundary);
-        final picture = (boundary.debugLayer! as OffsetLayer).firstChild;
-        expect(picture, isA<PictureLayer>());
-        final snapshot = tester.widget<SnapshotWidget>(_shadowSnapshot);
-        expect(snapshot.controller.allowSnapshotting, isTrue);
-        expect(snapshot.autoresize, isTrue);
-        expect((snapshot.child! as CustomPaint).child, isNull, reason: 'only the shadow is snapshotted');
-        expect(images, hasLength(1));
-        final image = images.single;
-        for (var i = 1; i <= 10; i++) {
-          frame.value = i;
-          await tester.pump();
-          expect(paints.last, i, reason: 'the foreground really repainted');
-          expect(images, hasLength(1), reason: 'content/fill updates reuse the same shadow texture');
-          expect(image.debugDisposed, isFalse);
-          expect(
-            (boundary.debugLayer! as OffsetLayer).firstChild,
-            same(picture),
-            reason: 'the shadow retained its recorded picture at frame $i',
-          );
-        }
-        await tester.pumpWidget(const SizedBox.shrink());
-        expect(image.debugDisposed, isTrue, reason: 'removing the surface releases its texture');
-        expect(tester.takeException(), isNull);
-      } finally {
-        debugDisableShadows = oldDisableShadows;
-      }
-    });
-
-    testWidgets('$tier shadow paint bounds include its overflow and follow content size', (tester) async {
-      final oldDisableShadows = debugDisableShadows;
-      debugDisableShadows = false;
-      try {
-        final size = ValueNotifier(const Size(120, 140));
-        addTearDown(size.dispose);
-        final images = _watchImages();
-        await tester.pumpWidget(
-          MaterialApp(
-            theme: buildLightTheme(),
-            home: Center(
-              child: ValueListenableBuilder<Size>(
-                valueListenable: size,
-                builder: (context, value, _) => GlassSurface(
-                  tier: tier,
-                  child: SizedBox.fromSize(size: value),
-                ),
-              ),
-            ),
-          ),
-        );
-        // Original outside clip: 2 * blurRadius + offset.distance + 2.
-        final extent = tier == GlassTier.sheet ? 74.0 : 58.0;
-        expect(images, hasLength(1));
-        final original = images.single;
-        for (final next in [const Size(120, 140), const Size(170, 90)]) {
-          size.value = next;
-          await tester.pump();
-          if (next != const Size(120, 140)) {
-            // Two-frame idle debounce clears resizing once a full frame passes
-            // without further size changes, then recaptures a single texture.
-            await tester.pump();
-            await tester.pump();
-          }
-          final glass = tester.getRect(find.byType(GlassSurface));
-          expect(glass.size, next, reason: 'the shadow must not affect layout');
-          expect(tester.getRect(_shadowBoundary), glass.inflate(extent));
-          final boundary = tester.renderObject<RenderRepaintBoundary>(_shadowBoundary);
-          expect(boundary.paintBounds.size, Size(next.width + 2 * extent, next.height + 2 * extent));
-          final dpr = MediaQuery.devicePixelRatioOf(tester.element(_shadowBoundary));
-          expect(images.last.width, ((next.width + 2 * extent) * dpr).ceil());
-          expect(images.last.height, ((next.height + 2 * extent) * dpr).ceil());
-        }
-        expect(images, hasLength(2), reason: 'a size change creates one replacement texture');
-        expect(original.debugDisposed, isTrue);
-
-        // Consecutive per-frame resizing (e.g. expanding TodoBar) must NOT allocate
-        // intermediate textures on every frame!
-        final beforeBurst = images.length;
-        for (var h = 100.0; h <= 220.0; h += 15.0) {
-          size.value = Size(170, h);
-          await tester.pump(const Duration(milliseconds: 16));
-        }
-        expect(images.length, beforeBurst, reason: '0 textures allocated during consecutive resize frames');
-        await tester.pump(const Duration(milliseconds: 16));
-        await tester.pump(const Duration(milliseconds: 16));
-        expect(images.length, beforeBurst + 1, reason: 'exactly 1 texture recaptured once settled');
-        expect(tester.takeException(), isNull);
-      } finally {
-        debugDisableShadows = oldDisableShadows;
-      }
-    });
-
-    testWidgets('$tier refreshes its texture for theme, shape, direction and DPR changes', (tester) async {
-      final oldDisableShadows = debugDisableShadows;
-      debugDisableShadows = false;
-      try {
-        final images = _watchImages();
-        var theme = buildLightTheme();
-        BorderRadiusGeometry radius = const BorderRadius.all(Radius.circular(28));
-        var direction = TextDirection.ltr;
-        var dpr = 1.0;
-        Widget scene() => MaterialApp(
-          theme: theme,
-          themeAnimationDuration: Duration.zero,
-          home: MediaQuery(
-            data: MediaQueryData(devicePixelRatio: dpr),
-            child: Directionality(
-              textDirection: direction,
-              child: Center(
-                child: GlassSurface(tier: tier, borderRadius: radius, child: const SizedBox(width: 120, height: 140)),
-              ),
-            ),
-          ),
-        );
-        await tester.pumpWidget(scene());
-        expect(images, hasLength(1));
-        final controller = tester.widget<SnapshotWidget>(_shadowSnapshot).controller;
-        var current = images.single;
-        for (final change in <VoidCallback>[
-          () => theme = buildDarkTheme(),
-          () => radius = const BorderRadiusDirectional.only(topStart: Radius.circular(28), bottomEnd: Radius.circular(6)),
-          () => direction = TextDirection.rtl,
-          () => dpr = 2,
-        ]) {
-          final before = images.length;
-          change();
-          await tester.pumpWidget(scene());
-          expect(images, hasLength(before + 1));
-          expect(current.debugDisposed, isTrue, reason: 'invalidating the texture releases the old image');
-          current = images.last;
-          expect(tester.widget<SnapshotWidget>(_shadowSnapshot).controller, same(controller));
-          final size = tester.getSize(_shadowBoundary);
-          expect(current.width, (size.width * dpr).ceil());
-          expect(current.height, (size.height * dpr).ceil());
-        }
-        final before = images.length;
-        await tester.pumpWidget(scene());
-        expect(images, hasLength(before), reason: 'an equivalent painter must keep its texture');
-        await tester.pumpWidget(const SizedBox.shrink());
-        expect(current.debugDisposed, isTrue);
-        expect(tester.takeException(), isNull);
-      } finally {
-        debugDisableShadows = oldDisableShadows;
-      }
-    });
+void _expectNoAncestorRepaintBoundary(Iterable<RenderBackdropFilter> filters, {required RenderObject stopAt}) {
+  expect(filters, isNotEmpty);
+  for (final filter in filters) {
+    RenderObject? node = filter.parent;
+    while (node != null && !identical(node, stopAt)) {
+      expect(
+        node,
+        isNot(isA<RenderRepaintBoundary>()),
+        reason: 'RenderBackdropFilter (${filter.debugCreator}) has an ancestor RenderRepaintBoundary '
+            '(${node.debugCreator}), which isolates BackdropFilter into an empty offscreen layer on Impeller OpenGLES',
+      );
+      node = node.parent;
+    }
   }
+}
+
+void main() {
+  setUpAll(loadTestFonts);
+
   for (final tier in [GlassTier.sheet, GlassTier.chrome]) {
     for (final shape in ['rounded', 'stadium', 'circle']) {
-      testWidgets('$tier cached $shape shadow matches uncached pixels outside the shape', (tester) async {
+      testWidgets('$tier $shape vector outer shadow paints strictly outside the shape without SnapshotWidget', (
+        tester,
+      ) async {
         tester.view.devicePixelRatio = 1;
         addTearDown(tester.view.resetDevicePixelRatio);
         final oldDisableShadows = debugDisableShadows;
@@ -243,43 +67,35 @@ void main() {
                 rim: Colors.transparent,
                 blurSigma: 0,
               );
-          Future<Uint8List> render(GlassTier tier) async {
-            await tester.pumpWidget(
-              MaterialApp(
-                theme: theme,
-                home: Center(
-                  child: RepaintBoundary(
-                    key: _captureKey,
-                    child: SizedBox.square(
-                      dimension: 360,
-                      child: Center(
-                        child: GlassSurface(
-                          tier: tier,
-                          style: style,
-                          borderRadius: const BorderRadius.all(Radius.circular(28)),
-                          stadium: shape == 'stadium',
-                          circle: shape == 'circle',
-                          child: const SizedBox(width: 120, height: 140),
-                        ),
+          await tester.pumpWidget(
+            MaterialApp(
+              theme: theme,
+              home: Center(
+                child: RepaintBoundary(
+                  key: _captureKey,
+                  child: SizedBox.square(
+                    dimension: 360,
+                    child: Center(
+                      child: GlassSurface(
+                        tier: tier,
+                        style: style,
+                        borderRadius: const BorderRadius.all(Radius.circular(28)),
+                        stadium: shape == 'stadium',
+                        circle: shape == 'circle',
+                        child: const SizedBox(width: 120, height: 140),
                       ),
                     ),
                   ),
                 ),
               ),
-            );
-            return _pixels(tester);
-          }
-
-          // Small circular buttons draw directly without allocating per-button
-          // shadow textures; superellipse and stadium panels cache their shadow.
-          final uncached = await render(GlassTier.card);
-          expect(_shadowBoundary, findsNothing);
-          final cached = await render(tier);
-          expect(_shadowBoundary, shape == 'circle' ? findsNothing : findsOneWidget);
-          expect(cached, orderedEquals(uncached), reason: 'cache bounds must not crop or move the original shadow');
-          int alpha(int x, int y) => cached[(y * 360 + x) * 4 + 3];
-          expect(alpha(180, 255), greaterThan(0), reason: 'soft shadow still paints below the 250px shape bottom');
-          expect(alpha(180, 180), 0, reason: 'the shadow never paints through the shape interior');
+            ),
+          );
+          expect(find.descendant(of: find.byType(GlassSurface), matching: find.byType(SnapshotWidget)), findsNothing);
+          expect(find.descendant(of: find.byType(GlassSurface), matching: find.byType(RepaintBoundary)), findsNothing);
+          final bytes = await _pixels(tester);
+          int alpha(int x, int y) => bytes[(y * 360 + x) * 4 + 3];
+          expect(alpha(180, 255), greaterThan(0), reason: 'soft shadow paints below the 250px shape bottom');
+          expect(alpha(180, 180), 0, reason: 'outer shadow never paints inside the glass interior');
           expect(alpha(0, 0), 0);
           expect(tester.takeException(), isNull);
         } finally {
@@ -288,4 +104,59 @@ void main() {
       });
     }
   }
+
+  testWidgets('every active GlassSurface BackdropFilter in HomeShell, ChatScreen, Drawer, and Sheet has no ancestor RepaintBoundary', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({});
+    freezeClocks();
+    final oldSnapshotCaching = AppBackdrop.snapshotCaching;
+    AppBackdrop.snapshotCaching = true;
+    addTearDown(() {
+      AppBackdrop.snapshotCaching = oldSnapshotCaching;
+      thawClocks();
+    });
+
+    usePhoneView(tester);
+    late VoidCallback openDrawer;
+    await tester.pumpWidget(
+      testApp(
+        HomeShell(
+          chatBuilder: (open) {
+            openDrawer = open;
+            return ChatScreen(onOpenDrawer: open, backdrop: false);
+          },
+        ),
+        overrides: homeOverrides(),
+      ),
+    );
+    await pumpFrames(tester, 10);
+
+    final shellRoot = tester.renderObject(find.byType(HomeShell));
+
+    // 1. ChatScreen chrome (header + composer + dock):
+    final chatFilters = tester.renderObjectList<RenderBackdropFilter>(find.byType(BackdropFilter));
+    _expectNoAncestorRepaintBoundary(chatFilters, stopAt: shellRoot);
+
+    // 2. Open SessionsDrawer:
+    openDrawer();
+    await tester.pump();
+    await pumpFrames(tester, 12);
+    final drawerFilters = tester.renderObjectList<RenderBackdropFilter>(find.byType(BackdropFilter));
+    _expectNoAncestorRepaintBoundary(drawerFilters, stopAt: shellRoot);
+
+    // 3. Open modal sheet over the open drawer (like ModeSheet / WorkspaceSheet):
+    final shellContext = tester.element(find.byType(HomeShell));
+    // ignore: unawaited_futures
+    showAppSheet<void>(shellContext, builder: (_) => const SizedBox(height: 280, child: Text('弹层内容')));
+    await tester.pumpAndSettle();
+    final bottomSheetRoot = tester.renderObject(find.byType(BottomSheet));
+    final sheetFilters = tester.renderObjectList<RenderBackdropFilter>(
+      find.descendant(of: find.byType(BottomSheet), matching: find.byType(BackdropFilter)),
+    );
+    _expectNoAncestorRepaintBoundary(sheetFilters, stopAt: bottomSheetRoot);
+    expect(sheetFilters.single.enabled, isTrue);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
 }

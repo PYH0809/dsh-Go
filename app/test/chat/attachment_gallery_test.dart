@@ -263,4 +263,38 @@ void main() {
     expect(find.byType(ImagePager), findsNothing);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('already-loaded stored image opens synchronously on the very first transition frame without a spinner', (
+    tester,
+  ) async {
+    usePhoneView(tester);
+    await tester.pumpWidget(
+      testApp(
+        Scaffold(
+          body: SentAttachments.echoed(
+            sessionId: 'session',
+            images: [_stored(0)],
+            files: const [],
+          ),
+        ),
+        overrides: [sessionImageProvider.overrideWith((ref, key) async => _png(1))],
+      ),
+    );
+    await pumpFrames(tester);
+    await tester.tap(find.bySemanticsLabel('图片'));
+    // Pump a single frame right as the route push begins (before any async Future microtask settles):
+    await tester.pump();
+    expect(
+      find.byType(CircularProgressIndicator),
+      findsNothing,
+      reason: 'warm session images must never flash a loading spinner on route push',
+    );
+    expect(find.byKey(const ValueKey('attachment-gallery-image-0'), skipOffstage: false), findsOneWidget);
+    // Advance mid-flight (50ms into route push) and verify still zero spinners:
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(find.byType(CircularProgressIndicator), findsNothing);
+    await pumpFrames(tester);
+    expect(find.byType(CircularProgressIndicator), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
 }
