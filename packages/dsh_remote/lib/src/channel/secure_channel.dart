@@ -226,9 +226,16 @@ class SecureChannel {
     );
   }
 
-  /// Switches outbound encrypted frames to [next], closing any superseded
-  /// intermediate leg while keeping [_controlTransport] alive.
-  Future<void> switchOutboundTransport(SecureHandshakeTransport next, {bool closePrevious = false}) async {
+  final Set<SecureHandshakeTransport> _drainingTransports = {};
+
+  /// Switches outbound encrypted frames to [next], draining any superseded
+  /// intermediate leg briefly so trailing inbound frames finish arriving
+  /// before teardown while keeping [_controlTransport] alive.
+  Future<void> switchOutboundTransport(
+    SecureHandshakeTransport next, {
+    bool closePrevious = false,
+    Duration previousDrain = const Duration(milliseconds: 1500),
+  }) async {
     if (_closed) {
       await next.close();
       return;
@@ -236,7 +243,14 @@ class SecureChannel {
     final prev = _transport;
     _transport = next;
     if (closePrevious && !identical(prev, next) && !identical(prev, _controlTransport)) {
-      unawaited(prev.close());
+      if (previousDrain <= Duration.zero) {
+        unawaited(prev.close());
+      } else {
+        _drainingTransports.add(prev);
+        Timer(previousDrain, () {
+          if (_drainingTransports.remove(prev)) unawaited(prev.close());
+        });
+      }
     }
   }
 
@@ -295,6 +309,10 @@ class SecureChannel {
     _noise.destroy();
     _incoming.reset();
     _outgoing.reset();
+    for (final stale in _drainingTransports.toList()) {
+      unawaited(stale.close());
+    }
+    _drainingTransports.clear();
     unawaited(_transport.close());
     if (!identical(_transport, _controlTransport)) {
       unawaited(_controlTransport.close());

@@ -77,7 +77,7 @@ void main() {
     expect(session.transport, 'lan');
     await Future<void>.delayed(Duration.zero);
     expect(seenTransports, containsAllInOrder(['relay', 'p2p', 'lan']));
-    expect(rtc.clients.first.closed, isTrue, reason: 'superseded P2P leg is cleanly closed');
+    expect(rtc.clients.first.closed, isFalse, reason: 'superseded P2P leg stays open briefly to drain trailing inbound frames');
     expect(rtc.clients.last.closed, isFalse, reason: 'new LAN leg is active');
 
     // Same Noise session & same open stream continue over LAN without interruption!
