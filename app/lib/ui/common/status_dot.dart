@@ -2,6 +2,7 @@
 
 import 'package:flutter/material.dart';
 
+import '../theme/glass.dart' show GlassBackdropScope;
 import '../theme/motion.dart';
 import '../theme/semantic_colors.dart';
 
@@ -71,12 +72,12 @@ class _StatusDotState extends State<StatusDot> with SingleTickerProviderStateMix
   }
 
   void _sync() {
-    if (widget.tone == StatusTone.busy && !AppMotion.reduced(context)) {
+    final active = GlassBackdropScope.animationsEnabledOf(context);
+    if (widget.tone == StatusTone.busy && !AppMotion.reduced(context) && active) {
       if (!_pulse.isAnimating) _pulse.repeat(reverse: true);
     } else {
-      _pulse
-        ..stop()
-        ..value = 0;
+      _pulse.stop();
+      if (widget.tone != StatusTone.busy || AppMotion.reduced(context)) _pulse.value = 0;
     }
   }
 
@@ -88,12 +89,14 @@ class _StatusDotState extends State<StatusDot> with SingleTickerProviderStateMix
 
   @override
   Widget build(BuildContext context) {
-    return FadeTransition(
-      opacity: _opacity,
-      child: Container(
-        width: widget.size,
-        height: widget.size,
-        decoration: BoxDecoration(color: StatusDot.colorFor(context, widget.tone), shape: BoxShape.circle),
+    return RepaintBoundary(
+      child: FadeTransition(
+        opacity: _opacity,
+        child: Container(
+          width: widget.size,
+          height: widget.size,
+          decoration: BoxDecoration(color: StatusDot.colorFor(context, widget.tone), shape: BoxShape.circle),
+        ),
       ),
     );
   }

@@ -154,6 +154,12 @@ class _BackdropScope extends InheritedWidget {
   bool updateShouldNotify(_BackdropScope old) => old.picture != picture;
 }
 
+extension BackdropVeilSampling on AppBackdrop {
+  /// Whether the nearest [AppBackdrop] currently paints a custom wallpaper
+  /// picture (as opposed to the smooth default gradient).
+  static bool hasPictureOf(BuildContext context) => _BackdropScope.of(context) != null;
+}
+
 /// [AppBackdrop] 的一角:同一张背景,只画底部 [solidHeight] + [feather] 这一条,
 /// 底部 [solidHeight] 实心,往上 [feather] 缓缓淡出。
 ///
@@ -167,15 +173,23 @@ class _BackdropScope extends InheritedWidget {
 /// [BackdropFrame] 告知它在整张背景里的位置,照样对得上。
 class BackdropVeil extends StatelessWidget {
   const BackdropVeil({super.key, required this.solidHeight, this.feather = defaultFeather, this.glow = true})
-    : fromTop = false;
+    : fromTop = false,
+      preSized = false;
 
   static const defaultFeather = 14.0;
+
+  /// Bottom veil already sized and positioned to its exact band (`solid + feather`)
+  /// by its parent layout delegate (`_ChatLayout`).
+  const BackdropVeil.band({super.key, required this.solidHeight, this.feather = defaultFeather, this.glow = true})
+    : fromTop = false,
+      preSized = true;
 
   /// 顶部版:从顶边往下 [height] 实心,再往下 [feather] 缓缓淡出(页面顶栏
   /// 后面)。同样要铺满整页、和页面左上角对齐。
   BackdropVeil.top({super.key, required double height, this.feather = defaultFeather, this.glow = true})
     : solidHeight = _FixedHeight(height),
-      fromTop = true;
+      fromTop = true,
+      preSized = false;
 
   /// 从底边往上实心的高度。由页面布局在排好浮动控件时写入:遮罩画在布局
   /// 之后,不经过重建,这一帧就按新高度画,和控件严丝合缝。
@@ -187,6 +201,9 @@ class BackdropVeil extends StatelessWidget {
 
   /// 顶部版([BackdropVeil.top])。
   final bool fromTop;
+
+  /// True when the parent already constrains this widget to the band height.
+  final bool preSized;
 
   @override
   Widget build(BuildContext context) {
@@ -211,6 +228,13 @@ class BackdropVeil extends StatelessWidget {
       pageHeight: area.height,
       backdrop: backdrop,
     );
+    if (preSized) {
+      return IgnorePointer(
+        child: picture != null || !AppBackdrop.snapshotCaching
+            ? CustomPaint(size: Size.infinite, painter: bandPainter)
+            : _CachedBandVeil(solidHeight: solidHeight, painter: bandPainter),
+      );
+    }
     if (picture != null || !AppBackdrop.snapshotCaching) {
       return IgnorePointer(
         child: CustomPaint(

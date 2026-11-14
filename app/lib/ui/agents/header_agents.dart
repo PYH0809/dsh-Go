@@ -182,7 +182,7 @@ class HeaderAgentsKey extends StatelessWidget {
             child: AnimatedOpacity(
               opacity: running ? 1 : 0,
               duration: AppMotion.of(context, AppMotion.quick),
-              child: const StatusDot(tone: StatusTone.busy, size: 7),
+              child: StatusDot(tone: running ? StatusTone.busy : StatusTone.idle, size: 7),
             ),
           ),
         ],

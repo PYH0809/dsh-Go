@@ -195,6 +195,7 @@ class ComposerCapsuleRow extends StatelessWidget {
       minHeight: CapsuleMetrics.height + 2 * shadowRoom,
       maxHeight: CapsuleMetrics.height + 2 * shadowRoom,
       child: BackdropGroup(
+        backdropKey: BackdropGroup.of(context)?.backdropKey,
         child: HorizontalEdgeFade(
           child: SingleChildScrollView(
             scrollDirection: Axis.horizontal,

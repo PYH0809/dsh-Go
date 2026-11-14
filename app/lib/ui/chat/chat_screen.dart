@@ -130,8 +130,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
   void didChangeDependencies() {
     super.didChangeDependencies();
     _keyboardInset ??= View.of(context).viewInsets.bottom;
-    _interactionRoute = ModalRoute.of<Object?>(context);
-    final current = ModalRoute.isCurrentOf(context) ?? true;
+  }
+
+  void _interactionRouteChanged(ModalRoute<Object?>? route) {
+    _interactionRoute = route;
+    final current = route?.isCurrent ?? true;
     if (current == _routeCurrent) return;
     _routeCurrent = current;
     if (current) {
@@ -1708,6 +1711,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
       generate: readOnly ? null : generate,
       risk: !pillsBesideStrip,
     );
+    final pageContext = context;
     final headerHeight = typing ? MediaQuery.paddingOf(context).top + AppSpace.sm : ChatHeader.heightOf(context);
 
     Widget backdrop(Widget child) => widget.backdrop ? WallpaperBackdrop(child: child) : child;
@@ -1814,11 +1818,13 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
                   ),
                   LayoutId(
                     id: _Slot.pluginOverlay,
-                    child: ClipRect(
-                      child: MediaQuery(
-                        // The layout already reserves the native chrome and keyboard.
-                        data: MediaQuery.of(context).copyWith(padding: EdgeInsets.zero, viewInsets: EdgeInsets.zero),
-                        child: PluginOverlayLayer(sessionId: sessionId),
+                    child: RepaintBoundary(
+                      child: ClipRect(
+                        child: MediaQuery(
+                          // The layout already reserves the native chrome and keyboard.
+                          data: MediaQuery.of(context).copyWith(padding: EdgeInsets.zero, viewInsets: EdgeInsets.zero),
+                          child: PluginOverlayLayer(sessionId: sessionId),
+                        ),
                       ),
                     ),
                   ),
@@ -1829,7 +1835,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
                   // the list's 8dp bottom padding, so the last message is untouched.
                   LayoutId(
                     id: _Slot.veil,
-                    child: BackdropVeil(solidHeight: _veilHeight),
+                    child: AppBackdrop.snapshotCaching
+                        ? RepaintBoundary(child: BackdropVeil.band(solidHeight: _veilHeight))
+                        : BackdropVeil(solidHeight: _veilHeight),
                   ),
                   LayoutId(
                     id: _Slot.header,
@@ -1877,59 +1885,59 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
                   ),
                   LayoutId(
                     id: _Slot.palette,
-                    child: Center(
-                      child: ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: AppSpace.floatingWidth),
-                        child: ListenableBuilder(
-                          listenable: Listenable.merge([_input, _mentions]),
-                          builder: (context, _) {
-                            // The `@` word at the caret wins over a "/" line.
-                            final live = connected && !readOnly;
-                            final mention = live && _mentions.isOpen;
-                            final content = live && !mention ? _slashContent(commands) : null;
-                            // The pet steps aside while a panel is up.
-                            return PopScope<Object?>(
-                              canPop: content == null,
-                              onPopInvokedWithResult: (didPop, _) {
-                                if (!didPop) _dismissSlashPalette();
-                              },
-                              child: PetCover(
-                                active: mention || content != null,
-                                child: AnimatedSwitcher(
-                                  duration: AppMotion.of(context, AppMotion.quick),
-                                  switchInCurve: AppMotion.enter,
-                                  switchOutCurve: AppMotion.exit,
-                                  transitionBuilder: (child, animation) => FadeTransition(
-                                    opacity: animation,
-                                    child: ScaleTransition(
-                                      alignment: Alignment.bottomCenter,
-                                      scale: Tween(begin: 0.96, end: 1.0).animate(animation),
-                                      child: child,
+                    child: RepaintBoundary(
+                      child: Center(
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: AppSpace.floatingWidth),
+                          child: ListenableBuilder(
+                            listenable: Listenable.merge([_input, _mentions]),
+                            builder: (context, _) {
+                              // The `@` word at the caret wins over a "/" line.
+                              final live = connected && !readOnly;
+                              final mention = live && _mentions.isOpen;
+                              final content = live && !mention ? _slashContent(commands) : null;
+                              // The pet steps aside while a panel is up.
+                              return PopScope<Object?>(
+                                canPop: content == null,
+                                onPopInvokedWithResult: (didPop, _) {
+                                  if (!didPop) _dismissSlashPalette();
+                                },
+                                child: PetCover(
+                                  active: mention || content != null,
+                                  child: AnimatedSwitcher(
+                                    duration: AppMotion.of(context, AppMotion.quick),
+                                    switchInCurve: AppMotion.enter,
+                                    switchOutCurve: AppMotion.exit,
+                                    transitionBuilder: (child, animation) => FadeTransition(
+                                      opacity: animation,
+                                      child: ScaleTransition(
+                                        alignment: Alignment.bottomCenter,
+                                        scale: Tween(begin: 0.96, end: 1.0).animate(animation),
+                                        child: child,
+                                      ),
                                     ),
+                                    child: mention
+                                        ? MentionPicker(key: const ValueKey('mention'), controller: _mentions)
+                                        : content == null
+                                        ? const SizedBox(key: ValueKey('none'), width: double.infinity)
+                                        : TextFieldTapRegion(
+                                            key: ValueKey(content is PaletteHint),
+                                            groupId: _composerGroup,
+                                            onTapOutside: (_) => _dismissSlashPalette(),
+                                            child: SlashPalette(content: content, onPick: _pick),
+                                          ),
                                   ),
-                                  child: mention
-                                      ? MentionPicker(key: const ValueKey('mention'), controller: _mentions)
-                                      : content == null
-                                      ? const SizedBox(key: ValueKey('none'), width: double.infinity)
-                                      : TextFieldTapRegion(
-                                          key: ValueKey(content is PaletteHint),
-                                          groupId: _composerGroup,
-                                          onTapOutside: (_) => _dismissSlashPalette(),
-                                          child: SlashPalette(content: content, onPick: _pick),
-                                        ),
                                 ),
-                              ),
-                            );
-                          },
+                              );
+                            },
+                          ),
                         ),
                       ),
                     ),
                   ),
                   LayoutId(
                     id: _Slot.composer,
-                    child: SafeArea(
-                      top: false,
-                      minimum: const EdgeInsets.only(bottom: 8),
+                    child: _ComposerVeilScope(
                       child: Padding(
                         // A little air above the (transparent) gesture bar;
                         // 12 at the sides like the header's keys above.
@@ -2038,26 +2046,26 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
                                 // while a phone on its side types.
                                 _DockAside(
                                   aside: typing,
-                                  child: BackdropGroup(
-                                    child: DockStack(
-                                      cards: [
-                                        if (sessionId != null) ...[
-                                          TodoDockSlot(sessionId: sessionId),
-                                          GoalDockSlot(sessionId: sessionId),
-                                          ActivityStripSlot(
+                                  child: DockStack(
+                                    cards: [
+                                      if (sessionId != null) ...[
+                                        TodoDockSlot(sessionId: sessionId),
+                                        GoalDockSlot(sessionId: sessionId),
+                                        Consumer(
+                                          builder: (context, ref, _) => ActivityStripSlot(
                                             sessionId: sessionId,
                                             onTap: () => _openRunningTrajectory(sessionId),
                                             // The todo bar shows it, unless it is folded behind the strip.
                                             todoProgress: ref.watch(dockFoldedProvider),
                                           ),
-                                        ],
-                                        // It gives the activity strip its place while a reply generates.
-                                        if (!readOnly) ComposerStripSlot(sessionId: sessionId, visible: !running),
+                                        ),
                                       ],
-                                      accessory: pillsBesideStrip
-                                          ? _stripRisk(sessionId, autoApprove: chat?.autoApprove ?? false)
-                                          : null,
-                                    ),
+                                      // It gives the activity strip its place while a reply generates.
+                                      if (!readOnly) ComposerStripSlot(sessionId: sessionId, visible: !running),
+                                    ],
+                                    accessory: pillsBesideStrip
+                                        ? _stripRisk(sessionId, autoApprove: chat?.autoApprove ?? false)
+                                        : null,
                                   ),
                                 ),
                                 // The capsules (ui.json's and plugins'), led
@@ -2096,7 +2104,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
                                     controller: _input,
                                     groupId: _composerGroup,
                                     // The page's context: Scaffold drops the keyboard inset below.
-                                    maxLines: Composer.linesFor(context),
+                                    maxLines: Composer.linesFor(pageContext),
                                     focusNode: _focus,
                                     connected: connected,
                                     running: chat?.running ?? false,
@@ -2134,8 +2142,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
                                     onStop: _stop,
                                     hasAttachments: _drafts.isNotEmpty,
                                     leading: AttachButton(onPressed: connected ? _attach : null),
-                                    keyboardInset: MediaQuery.viewInsetsOf(context).bottom,
-                                    footer: _composerOpens(context) && !isChild
+                                    keyboardInset: MediaQuery.viewInsetsOf(pageContext).bottom,
+                                    footer: _composerOpens(pageContext) && !isChild
                                         ? ComposerModelPill(
                                             selection: sessionId == null ? pendingModel : chat?.model,
                                             onSelected: _modelTarget(),
@@ -2178,7 +2186,13 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
         ),
       ),
     );
-    return UiTrace(scope: 'chat', child: screen);
+    final child = UiTrace(scope: 'chat', child: screen);
+    // Route changes revoke/restore interaction and suspend covered glass blur
+    // without rebuilding the message page underneath a sheet.
+    return _RouteInteractionScope(
+      onRouteChanged: _interactionRouteChanged,
+      child: child,
+    );
   }
 
   /// What sits on the composer's top-left edge: 「自动允许中 ×」 while this
@@ -2401,10 +2415,11 @@ class _HeaderAside extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final duration = AppMotion.of(context, AppMotion.standard);
-    return Stack(
-      // The header's own fade runs past its bar.
-      clipBehavior: Clip.none,
-      children: [
+    return RepaintBoundary(
+      child: Stack(
+        // The header's own fade runs past its bar.
+        clipBehavior: Clip.none,
+        children: [
         Positioned(
           left: 0,
           right: 0,
@@ -2430,7 +2445,8 @@ class _HeaderAside extends StatelessWidget {
             ),
           ),
         ),
-      ],
+        ],
+      ),
     );
   }
 }
@@ -2465,12 +2481,16 @@ class _ChatLayout extends MultiChildLayoutDelegate {
     final composer = layoutChild(_Slot.composer, along);
     final top = size.height - composer.height;
     positionChild(_Slot.composer, Offset(0, top));
-    veilHeight.value = math.max(0, composer.height - overlap);
+    final solid = math.max(0.0, composer.height - overlap);
+    veilHeight.value = solid;
 
     layoutChild(_Slot.body, BoxConstraints.tight(Size(width, math.max(0, top + overlap))));
     positionChild(_Slot.body, Offset.zero);
-    layoutChild(_Slot.veil, BoxConstraints.tight(size));
-    positionChild(_Slot.veil, Offset.zero);
+    final veilBand = AppBackdrop.snapshotCaching
+        ? (solid + BackdropVeil.defaultFeather).clamp(0.0, size.height)
+        : size.height;
+    layoutChild(_Slot.veil, BoxConstraints.tight(Size(width, veilBand)));
+    positionChild(_Slot.veil, Offset(0, size.height - veilBand));
     final header = layoutChild(_Slot.header, along);
     positionChild(_Slot.header, Offset.zero);
     // Web content cannot paint or receive touches on native navigation/input.
@@ -2533,4 +2553,67 @@ class _ChatScaler extends TextScaler {
 
   @override
   int get hashCode => Object.hash(base, factor);
+}
+
+class _RouteInteractionScope extends StatefulWidget {
+  const _RouteInteractionScope({required this.onRouteChanged, required this.child});
+
+  final ValueChanged<ModalRoute<Object?>?> onRouteChanged;
+  final Widget child;
+
+  @override
+  State<_RouteInteractionScope> createState() => _RouteInteractionScopeState();
+}
+
+class _RouteInteractionScopeState extends State<_RouteInteractionScope> {
+  ModalRoute<Object?>? _route;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _route = ModalRoute.of<Object?>(context);
+    widget.onRouteChanged(_route);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final current = _route?.isCurrent ?? true;
+    final uncovered = !AppBackdrop.snapshotCaching || current;
+    return GlassBackdropScope(
+      enabled: GlassBackdropScope.enabledOf(context) && uncovered,
+      translucentWhenDisabled: GlassBackdropScope.translucentWhenDisabledOf(context),
+      animationsEnabled: GlassBackdropScope.animationsEnabledOf(context) && uncovered,
+      child: widget.child,
+    );
+  }
+}
+
+/// Wraps `_Slot.composer` in a single `RepaintBoundary` + `BackdropGroup`, and
+/// skips offscreen `BackdropFilter` readbacks when the solid gradient
+/// `BackdropVeil` behind it has no custom wallpaper picture.
+class _ComposerVeilScope extends StatelessWidget {
+  const _ComposerVeilScope({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final parentSampling = GlassBackdropScope.enabledOf(context);
+    final parentTranslucent = GlassBackdropScope.translucentWhenDisabledOf(context);
+    final parentAnimations = GlassBackdropScope.animationsEnabledOf(context);
+    final skipVeilBlur = AppBackdrop.snapshotCaching && !BackdropVeilSampling.hasPictureOf(context);
+    final scoped = GlassBackdropScope(
+      enabled: parentSampling && !skipVeilBlur,
+      translucentWhenDisabled: parentTranslucent || skipVeilBlur,
+      animationsEnabled: parentAnimations,
+      child: BackdropGroup(
+        child: SafeArea(
+          top: false,
+          minimum: const EdgeInsets.only(bottom: 8),
+          child: child,
+        ),
+      ),
+    );
+    return AppBackdrop.snapshotCaching ? RepaintBoundary(child: scoped) : scoped;
+  }
 }

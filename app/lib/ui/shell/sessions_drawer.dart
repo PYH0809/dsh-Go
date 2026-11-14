@@ -28,6 +28,7 @@ import '../chat/media/media_format.dart' show chatTitleShown;
 import '../common/app_sheet.dart';
 import '../common/empty_view.dart';
 import '../common/pressable.dart';
+import '../common/scroll_edge_fade.dart';
 import '../common/smooth_size.dart';
 import '../common/read_list_status.dart';
 import '../common/status_dot.dart';
@@ -144,42 +145,44 @@ class SessionsDrawer extends ConsumerWidget {
     // would leave room for two conversations, so it scrolls away with them.
     final short = MediaQuery.sizeOf(context).height < WindowClass.compactHeight;
     final top = <Widget>[
-      AnimatedSwitcher(
-        duration: quick,
-        child: selecting
-            ? DrawerSelectionHeader(key: const ValueKey('selecting'), now: now)
-            : Padding(
-                key: const ValueKey('brand'),
-                // The lockup lines up with the rows' text (20); the
-                // button's edge with the search bar's and the rows'
-                // edges (10).
-                padding: const EdgeInsets.fromLTRB(20, 14, 10, 10),
-                child: LayoutBuilder(
-                  builder: (context, box) => Row(
-                    children: [
-                      // On a narrow drawer with large text the lockup gives
-                      // way a little rather than the keys.
-                      const Expanded(
-                        child: Align(
-                          alignment: AlignmentDirectional.centerStart,
-                          child: FittedBox(fit: BoxFit.scaleDown, child: BrandLockup(height: 19)),
+      RepaintBoundary(
+        child: AnimatedSwitcher(
+          duration: quick,
+          child: selecting
+              ? DrawerSelectionHeader(key: const ValueKey('selecting'), now: now)
+              : Padding(
+                  key: const ValueKey('brand'),
+                  // The lockup lines up with the rows' text (20); the
+                  // button's edge with the search bar's and the rows'
+                  // edges (10).
+                  padding: const EdgeInsets.fromLTRB(20, 14, 10, 10),
+                  child: LayoutBuilder(
+                    builder: (context, box) => Row(
+                      children: [
+                        // On a narrow drawer with large text the lockup gives
+                        // way a little rather than the keys.
+                        const Expanded(
+                          child: Align(
+                            alignment: AlignmentDirectional.centerStart,
+                            child: FittedBox(fit: BoxFit.scaleDown, child: BrandLockup(height: 19)),
+                          ),
                         ),
-                      ),
-                      // 模式 and 网页模式, quietly: the one solid element stays 新对话.
-                      const ModeKey(),
-                      const SizedBox(width: 8),
-                      const WebModeKey(tier: GlassTier.pill),
-                      const SizedBox(width: 8),
-                      // When even the lockup's room is not enough, 新对话
-                      // keeps its glyph and lets its words go.
-                      NewChatButton(
-                        onTap: newChat,
-                        compact: NewChatButton.widthOf(context) > box.maxWidth - (36 + 8 + 36 + 8),
-                      ),
-                    ],
+                        // 模式 and 网页模式, quietly: the one solid element stays 新对话.
+                        const ModeKey(),
+                        const SizedBox(width: 8),
+                        const WebModeKey(tier: GlassTier.pill),
+                        const SizedBox(width: 8),
+                        // When even the lockup's room is not enough, 新对话
+                        // keeps its glyph and lets its words go.
+                        NewChatButton(
+                          onTap: newChat,
+                          compact: NewChatButton.widthOf(context) > box.maxWidth - (36 + 8 + 36 + 8),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-              ),
+        ),
       ),
       SafeModeBanner(
         padding: const EdgeInsets.fromLTRB(10, 0, 10, 8),
@@ -235,60 +238,62 @@ class SessionsDrawer extends ConsumerWidget {
             ],
             // The action bar lies exactly over the identity bar, which
             // keeps its size while hidden: same height at any text size.
-            _ReportHeight(
-              height: identityBarHeight,
-              child: Stack(
-                children: [
-                  AnimatedOpacity(
-                    opacity: selecting ? 0 : 1,
-                    duration: quick,
-                    child: IgnorePointer(
-                      ignoring: selecting,
-                      child: ExcludeSemantics(
-                        excluding: selecting,
-                        child: IdentityBar(
-                          onHost: () => showHostSheet(context, onManage: () => onOpen(DrawerDestination.remote)),
-                          onLocalDetails: () => onOpen(DrawerDestination.engine),
-                          onFeatures: () => onOpen(DrawerDestination.features),
-                          onSettings: () => onOpen(DrawerDestination.settings),
-                          onSettingsHold: () => onOpen(DrawerDestination.settingsSearch),
+            RepaintBoundary(
+              child: _ReportHeight(
+                height: identityBarHeight,
+                child: Stack(
+                  children: [
+                    AnimatedOpacity(
+                      opacity: selecting ? 0 : 1,
+                      duration: quick,
+                      child: IgnorePointer(
+                        ignoring: selecting,
+                        child: ExcludeSemantics(
+                          excluding: selecting,
+                          child: IdentityBar(
+                            onHost: () => showHostSheet(context, onManage: () => onOpen(DrawerDestination.remote)),
+                            onLocalDetails: () => onOpen(DrawerDestination.engine),
+                            onFeatures: () => onOpen(DrawerDestination.features),
+                            onSettings: () => onOpen(DrawerDestination.settings),
+                            onSettingsHold: () => onOpen(DrawerDestination.settingsSearch),
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                  Positioned.fill(
-                    child: AnimatedSwitcher(
-                      duration: quick,
-                      child: selecting
-                          ? SelectionActionBar(
-                              key: const ValueKey('selecting'),
-                              onMove: () {
-                                if (ref.read(drawerScopeProvider)?.readOnly == false) {
-                                  moveToFolderFlow(
-                                    context,
-                                    ref,
-                                    ref.read(drawerSelectionProvider)?.toList() ?? const [],
-                                  );
-                                }
-                              },
-                              onPin: () {
-                                if (ref.read(drawerScopeProvider)?.readOnly == false) pinSelectionFlow(context, ref);
-                              },
-                              onArchive: () {
-                                if (ref.read(drawerScopeProvider)?.readOnly == false) {
-                                  archiveSelectionFlow(context, ref);
-                                }
-                              },
-                              onDelete: () {
-                                if (ref.read(drawerScopeProvider)?.readOnly == false) {
-                                  unawaited(deleteSelectionFlow(context, ref));
-                                }
-                              },
-                            )
-                          : const SizedBox.shrink(),
+                    Positioned.fill(
+                      child: AnimatedSwitcher(
+                        duration: quick,
+                        child: selecting
+                            ? SelectionActionBar(
+                                key: const ValueKey('selecting'),
+                                onMove: () {
+                                  if (ref.read(drawerScopeProvider)?.readOnly == false) {
+                                    moveToFolderFlow(
+                                      context,
+                                      ref,
+                                      ref.read(drawerSelectionProvider)?.toList() ?? const [],
+                                    );
+                                  }
+                                },
+                                onPin: () {
+                                  if (ref.read(drawerScopeProvider)?.readOnly == false) pinSelectionFlow(context, ref);
+                                },
+                                onArchive: () {
+                                  if (ref.read(drawerScopeProvider)?.readOnly == false) {
+                                    archiveSelectionFlow(context, ref);
+                                  }
+                                },
+                                onDelete: () {
+                                  if (ref.read(drawerScopeProvider)?.readOnly == false) {
+                                    unawaited(deleteSelectionFlow(context, ref));
+                                  }
+                                },
+                              )
+                            : const SizedBox.shrink(),
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           ],
@@ -428,8 +433,8 @@ class _ViewOptionsKey extends ConsumerWidget {
 }
 
 /// Soft top and bottom edges on the list, so rows fade into the header and
-/// the identity bar instead of being cut. At rest nothing is under either fade
-/// (the list's own padding is deeper).
+/// the identity bar instead of being cut. When nothing scrolls under an edge,
+/// [ScrollEdgeFade] omits the offscreen ShaderMaskLayer altogether.
 class _EdgeFade extends StatelessWidget {
   const _EdgeFade({required this.child});
 
@@ -439,21 +444,13 @@ class _EdgeFade extends StatelessWidget {
   static const _bottom = 16.0;
 
   @override
-  Widget build(BuildContext context) {
-    return ShaderMask(
-      blendMode: BlendMode.dstIn,
-      shaderCallback: (rect) {
-        final h = rect.height <= 0 ? 1.0 : rect.height;
-        return LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: const [Color(0x00000000), Color(0xFF000000), Color(0xFF000000), Color(0x00000000)],
-          stops: [0, (_top / h).clamp(0.0, 0.5), (1 - _bottom / h).clamp(0.5, 1.0), 1],
-        ).createShader(rect);
-      },
+  Widget build(BuildContext context) => RepaintBoundary(
+    child: ScrollEdgeFade(
+      topExtent: _top,
+      bottomExtent: _bottom,
       child: child,
-    );
-  }
+    ),
+  );
 }
 
 class _SessionList extends ConsumerWidget {

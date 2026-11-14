@@ -29,6 +29,7 @@ class ReadOnlyBar extends StatelessWidget {
       child: GlassSurface(
         tier: GlassTier.chrome,
         borderRadius: AppShape.radiusXl,
+        grouped: true,
         child: ConstrainedBox(
           constraints: const BoxConstraints(minHeight: height),
           child: Padding(
