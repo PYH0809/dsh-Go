@@ -168,10 +168,7 @@ class SessionsDrawer extends ConsumerWidget {
                         const SizedBox(width: 8),
                         // When even the lockup's room is not enough, 新对话
                         // keeps its glyph and lets its words go.
-                        NewChatButton(
-                          onTap: newChat,
-                          compact: NewChatButton.widthOf(context) > box.maxWidth - (36 + 8 + 36 + 8),
-                        ),
+                        _NewChatResponsiveButton(onTap: newChat, availableWidth: box.maxWidth - (36 + 8 + 36 + 8)),
                       ],
                     ),
                   ),
@@ -1138,4 +1135,17 @@ class _ClearSelectionWhenHidden extends ConsumerWidget {
     }
     return const SizedBox.shrink();
   }
+}
+
+class _NewChatResponsiveButton extends StatelessWidget {
+  const _NewChatResponsiveButton({required this.onTap, required this.availableWidth});
+
+  final VoidCallback onTap;
+  final double availableWidth;
+
+  @override
+  Widget build(BuildContext context) => NewChatButton(
+    onTap: onTap,
+    compact: NewChatButton.widthOf(context) > availableWidth,
+  );
 }
