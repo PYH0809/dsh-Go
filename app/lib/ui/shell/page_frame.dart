@@ -284,7 +284,6 @@ class _AppPageState extends State<AppPage> {
     );
     return GlassBackdropScope(
       enabled: GlassBackdropScope.enabledOf(context) && uncovered,
-      translucentWhenDisabled: GlassBackdropScope.translucentWhenDisabledOf(context),
       animationsEnabled: GlassBackdropScope.animationsEnabledOf(context) && uncovered,
       child: UiTrace(scope: 'page', child: page),
     );

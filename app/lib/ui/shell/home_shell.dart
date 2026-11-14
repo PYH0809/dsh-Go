@@ -531,7 +531,6 @@ class _SideParallax extends StatelessWidget {
       builder: (context) {
         final routeCurrent = ModalRoute.of<Object?>(context)?.isCurrent ?? true;
         final parentSampling = GlassBackdropScope.enabledOf(context);
-        final parentTranslucent = GlassBackdropScope.translucentWhenDisabledOf(context);
         final parentAnimations = GlassBackdropScope.animationsEnabledOf(context);
         final uncovered = !AppBackdrop.snapshotCaching || routeCurrent;
         return AnimatedBuilder(
@@ -548,7 +547,6 @@ class _SideParallax extends StatelessWidget {
             // a side panel is open/moving or a modal route covers the shell.
             return GlassBackdropScope(
               enabled: active,
-              translucentWhenDisabled: parentTranslucent,
               animationsEnabled: parentAnimations && uncovered && !suspendCovered,
               child: Transform.translate(
                 offset: Offset(fluid ? _share * (drawer.value * drawerWidth - quickPanel.value * quickPanelWidth) : 0, 0),
@@ -599,11 +597,9 @@ class _DrawerOverlayState extends State<_DrawerOverlay> {
         final routeActive = TickerMode.valuesOf(context).enabled;
         final uncovered = !AppBackdrop.snapshotCaching || routeCurrent;
         final parentSampling = GlassBackdropScope.enabledOf(context);
-        final parentTranslucent = GlassBackdropScope.translucentWhenDisabledOf(context);
         final parentAnimations = GlassBackdropScope.animationsEnabledOf(context);
         return GlassBackdropScope(
           enabled: parentSampling && uncovered,
-          translucentWhenDisabled: parentTranslucent,
           animationsEnabled: parentAnimations && uncovered,
           child: AnimatedBuilder(
             animation: widget.animation,

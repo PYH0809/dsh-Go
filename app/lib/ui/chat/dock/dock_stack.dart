@@ -193,7 +193,6 @@ class _DockStackState extends ConsumerState<DockStack> with TickerProviderStateM
       ),
     ];
     final parentSampling = GlassBackdropScope.enabledOf(context);
-    final parentTranslucent = GlassBackdropScope.translucentWhenDisabledOf(context);
     final parentAnimations = GlassBackdropScope.animationsEnabledOf(context);
     final layout = AnimatedBuilder(
       animation: Listenable.merge([_curve, _turn]),
@@ -205,7 +204,6 @@ class _DockStackState extends ConsumerState<DockStack> with TickerProviderStateM
         final moving = (_spread.value > 0 && _spread.value < 1) || _turn.value != _turn.value.roundToDouble();
         return GlassBackdropScope(
           enabled: parentSampling && !moving,
-          translucentWhenDisabled: parentTranslucent && !moving,
           animationsEnabled: parentAnimations,
           child: _DockStackLayout(
             spread: _curve.value,
