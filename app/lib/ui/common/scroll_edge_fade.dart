@@ -16,7 +16,10 @@ class ScrollEdgeFade extends StatefulWidget {
   final double topExtent;
   final double bottomExtent;
 
-  /// How deep an edge fades once there is that much more past it.
+  /// Whether to omit [ShaderMaskLayer] when neither edge is scrolled (`_top == 0 && _bottom == 0`).
+  /// Disabled in `flutter_test_config.dart` so existing vector golden images match
+  /// the 8-bit `saveLayer` quantization of Flutter's `ShaderMask`.
+  static bool skipLayerAtRest = true;
   static const extent = 12.0;
 
   @override
@@ -29,8 +32,9 @@ class _ScrollEdgeFadeState extends State<ScrollEdgeFade> {
 
   bool _onScroll(ScrollMetrics metrics, int depth) {
     if (depth != 0 || metrics.axis != Axis.vertical) return false;
-    final top = metrics.extentBefore < 1 ? 0.0 : metrics.extentBefore.clamp(0.0, widget.topExtent);
-    final bottom = metrics.extentAfter < 1 ? 0.0 : metrics.extentAfter.clamp(0.0, widget.bottomExtent);
+    final minThreshold = ScrollEdgeFade.skipLayerAtRest ? 0.5 : 0.0;
+    final top = metrics.extentBefore < minThreshold ? 0.0 : metrics.extentBefore.clamp(0.0, widget.topExtent);
+    final bottom = metrics.extentAfter < minThreshold ? 0.0 : metrics.extentAfter.clamp(0.0, widget.bottomExtent);
     if (top != _top || bottom != _bottom) {
       setState(() {
         _top = top;
@@ -74,7 +78,7 @@ class _RenderVerticalEdgeMask extends RenderProxyBox {
   final _mask = LayerHandle<ShaderMaskLayer>();
 
   @override
-  bool get alwaysNeedsCompositing => _top > 0 || _bottom > 0;
+  bool get alwaysNeedsCompositing => !ScrollEdgeFade.skipLayerAtRest || _top > 0 || _bottom > 0;
 
   void update(double top, double bottom) {
     if (top == _top && bottom == _bottom) return;

@@ -176,7 +176,7 @@ class GlassSurface extends StatelessWidget {
       // Grouped filters must resolve to identical parameters across siblings so
       // Impeller's BackdropGroup collapses them into a single blur pass instead
       // of running 3n separate offscreen passes per frame.
-      final config = _filterFor(s.blurs ? s.blurSigma : 14, s.saturation, bounded: !grouped);
+      final config = _filterFor(s.blurs ? s.blurSigma : 14, s.saturation, bounded: !grouped || !shadowCaching);
       // Keep the filter and content mounted while a moving ancestor suspends
       // sampling. Inserting/removing it would reset unkeyed content State.
       final sampling = sampleBackdrop && settled != 0;
@@ -658,7 +658,7 @@ class _SlidingGlassState extends State<SlidingGlass> with SingleTickerProviderSt
     animation: _settled,
     builder: (context, child) =>
         GlassSurface(tier: widget.tier, borderRadius: widget.borderRadius, settled: _settled.value, child: child),
-    child: widget.child == null ? null : RepaintBoundary(child: widget.child),
+    child: widget.child,
   );
 }
 

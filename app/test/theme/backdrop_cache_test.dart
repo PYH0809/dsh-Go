@@ -95,8 +95,14 @@ Future<void> _withRealShadows(Future<void> Function() body) async {
 }
 
 void main() {
-  setUp(() => AppBackdrop.snapshotCaching = true);
-  tearDown(() => AppBackdrop.snapshotCaching = false);
+  setUp(() {
+    AppBackdrop.snapshotCaching = true;
+    ScrollEdgeFade.skipLayerAtRest = true;
+  });
+  tearDown(() {
+    AppBackdrop.snapshotCaching = false;
+    ScrollEdgeFade.skipLayerAtRest = false;
+  });
 
   testWidgets('a static gradient retains one texture while content and ink stay live', (tester) => _withRealShadows(() async {
     final images = _watchImages();

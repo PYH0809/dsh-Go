@@ -66,9 +66,7 @@ class AppBackdrop extends StatelessWidget {
               ),
             ),
           ),
-          RepaintBoundary(
-            child: Material(type: MaterialType.transparency, child: child),
-          ),
+          Material(type: MaterialType.transparency, child: child),
         ],
       ),
     );
@@ -213,7 +211,7 @@ class BackdropVeil extends StatelessWidget {
       pageHeight: area.height,
       backdrop: backdrop,
     );
-    if (picture != null) {
+    if (picture != null || !AppBackdrop.snapshotCaching) {
       return IgnorePointer(
         child: CustomPaint(
           size: Size.infinite,
@@ -226,9 +224,7 @@ class BackdropVeil extends StatelessWidget {
         solidHeight: solidHeight,
         feather: feather,
         fromTop: fromTop,
-        child: AppBackdrop.snapshotCaching
-            ? _CachedBandVeil(solidHeight: solidHeight, painter: bandPainter)
-            : CustomPaint(size: Size.infinite, painter: bandPainter),
+        child: _CachedBandVeil(solidHeight: solidHeight, painter: bandPainter),
       ),
     );
   }
