@@ -369,7 +369,7 @@ class _HostRuns {
     _statusDuringList.clear();
     _infoDuringList.clear();
     try {
-      final list = await readSharedSessionList(client);
+      final list = await readSharedSessionList(client, consumer: SessionListConsumer.pets);
       if (_disposed || readyEpoch != _readyEpoch) return;
       // Merge the snapshot only for fields untouched by newer stream edges.
       // Tombstones stay in the sets until this request finishes, so a removal

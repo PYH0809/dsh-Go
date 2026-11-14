@@ -613,7 +613,7 @@ class DshUiRemoteHost implements UiRemoteHost {
 
   @override
   Future<String?> recentSessionId() async {
-    final sessions = await readSharedSessionList(client);
+    final sessions = await readSharedSessionList(client, consumer: SessionListConsumer.uiConfig);
     if (sessions.isEmpty) return null;
     final ranked = [...sessions]
       ..sort((a, b) {

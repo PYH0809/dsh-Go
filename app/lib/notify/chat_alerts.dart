@@ -370,7 +370,7 @@ class DshAlertSource implements AlertSource {
   bool get connected => client.mux.generation != null;
 
   @override
-  Future<List<SessionSummary>> listSessions() => readSharedSessionList(client);
+  Future<List<SessionSummary>> listSessions() => readSharedSessionList(client, consumer: SessionListConsumer.alerts);
 
   @override
   Future<ToolCallPart?> approvalCall(ApprovalRequest request) async {
