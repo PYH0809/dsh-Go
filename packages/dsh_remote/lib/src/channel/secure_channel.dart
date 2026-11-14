@@ -45,7 +45,7 @@ class SecureChannelException implements Exception {
 ///   any duplicate, gap, reorder, forgery or framing error closes the
 ///   channel (fail closed). There is no rekey (upstream roadmap).
 class SecureChannel {
-  SecureChannel._(this._transport, this._noise);
+  SecureChannel._(this._controlTransport, this._noise) : _transport = _controlTransport;
 
   static Future<SecureChannel> establish({
     required SecureHandshakeTransport transport,
@@ -83,7 +83,8 @@ class SecureChannel {
     return channel;
   }
 
-  final SecureHandshakeTransport _transport;
+  final SecureHandshakeTransport _controlTransport;
+  SecureHandshakeTransport _transport;
   final NoiseIkSession _noise;
   final SecureMessageCodec _incoming = SecureMessageCodec();
   final SecureMessageCodec _outgoing = SecureMessageCodec();
@@ -93,6 +94,7 @@ class SecureChannel {
   final List<Uint8List> _backlog = [];
   SecureChannelClosed? _closedReason;
   bool _closed = false;
+  bool _acceptingUpgrade = false;
   Future<void> _sendTail = Future.value();
 
   RemoteTransportMode get mode => _transport.mode;
@@ -107,9 +109,13 @@ class SecureChannel {
     final done = _handshakeDone = Completer<void>();
     // listen may synchronously replay closure before the awaited send starts.
     done.future.ignore();
-    _transport.listen(onData: _onData, onHandshake: _onHandshakeMessage, onClosed: _onTransportClosed);
+    _controlTransport.listen(
+      onData: _onData,
+      onHandshake: _onHandshakeMessage,
+      onClosed: (reason) => _onSpecificTransportClosed(_controlTransport, reason),
+    );
     try {
-      await _transport.sendHandshake(1, _noise.writeHandshake());
+      await _controlTransport.sendHandshake(1, _noise.writeHandshake());
       await done.future.timeout(timeout);
     } on TimeoutException {
       _fail(const SecureChannelClosed('SECURE_CHANNEL_FAILED', 'Noise IK handshake timed out.'));
@@ -149,34 +155,103 @@ class SecureChannel {
     }
   }
 
+  /// Buffers out-of-order frames across an in-band transport upgrade (e.g. a
+  /// fast DataChannel frame arriving before the last trailing Relay frame).
+  final Map<int, Uint8List> _futureCounterFrames = {};
+
+  void _deliverPlaintext(Uint8List plaintext) {
+    final message = _incoming.decode(plaintext);
+    if (message == null) return;
+    final handler = _onMessage;
+    if (handler == null) {
+      _backlog.add(message);
+    } else {
+      handler(message);
+    }
+  }
+
+  void _drainReorderBuffers() {
+    while (!_closed) {
+      final exact = _futureCounterFrames.remove(_noise.receivingCounter);
+      if (exact == null) break;
+      _deliverPlaintext(_noise.decrypt(exact));
+    }
+  }
+
   void _onData(Uint8List ciphertext, int? counter) {
     if (_closed) return;
     try {
       if (!_noise.complete) {
         throw const ProtocolError('Ciphertext arrived before the Noise handshake completed.');
       }
-      if (counter != null && counter != _noise.receivingCounter) {
-        throw const ProtocolError('Relay counter is duplicated or out of order.');
+      if (counter != null) {
+        if (counter < _noise.receivingCounter) {
+          throw const ProtocolError('Relay counter is duplicated or out of order.');
+        }
+        if (counter > _noise.receivingCounter) {
+          if (_acceptingUpgrade && _futureCounterFrames.length < 256) {
+            _futureCounterFrames[counter] = ciphertext;
+            return;
+          }
+          throw const ProtocolError('Relay counter is duplicated or out of order.');
+        }
+        _deliverPlaintext(_noise.decrypt(ciphertext));
+        _drainReorderBuffers();
+        return;
       }
-      final message = _incoming.decode(_noise.decrypt(ciphertext));
-      if (message == null) return;
-      final handler = _onMessage;
-      if (handler == null) {
-        _backlog.add(message);
-      } else {
-        handler(message);
-      }
+      _deliverPlaintext(_noise.decrypt(ciphertext));
     } on Object catch (error) {
       _fail(SecureChannelClosed('SECURE_CHANNEL_FAILED', 'Secure channel input rejected: $error'));
     }
   }
 
-  void _onTransportClosed(RemoteTransportClosed reason) {
+  void _onSpecificTransportClosed(SecureHandshakeTransport source, RemoteTransportClosed reason) {
+    if (!identical(source, _transport) && !identical(source, _controlTransport)) return;
     final done = _handshakeDone;
     if (done != null && !done.isCompleted) {
       done.completeError(SecureChannelException(reason.code, reason.message, retryable: reason.retryable));
     }
     _fail(SecureChannelClosed(reason.code, reason.message, retryable: reason.retryable));
+  }
+
+  /// Attaches an in-band upgraded [SecureHandshakeTransport] (Relay -> TURN ->
+  /// P2P -> LAN) to this Noise session without resetting nonces or streams.
+  void attachIncomingTransport(SecureHandshakeTransport next) {
+    if (_closed) return;
+    _acceptingUpgrade = true;
+    next.listen(
+      onData: _onData,
+      onHandshake: (_, _) {},
+      onClosed: (reason) => _onSpecificTransportClosed(next, reason),
+    );
+  }
+
+  final Set<SecureHandshakeTransport> _drainingTransports = {};
+
+  /// Switches outbound encrypted frames to [next], draining any superseded
+  /// intermediate leg briefly so trailing inbound frames finish arriving
+  /// before teardown while keeping [_controlTransport] alive.
+  Future<void> switchOutboundTransport(
+    SecureHandshakeTransport next, {
+    bool closePrevious = false,
+    Duration previousDrain = const Duration(milliseconds: 1500),
+  }) async {
+    if (_closed) {
+      await next.close();
+      return;
+    }
+    final prev = _transport;
+    _transport = next;
+    if (closePrevious && !identical(prev, next) && !identical(prev, _controlTransport)) {
+      if (previousDrain <= Duration.zero) {
+        unawaited(prev.close());
+      } else {
+        _drainingTransports.add(prev);
+        Timer(previousDrain, () {
+          if (_drainingTransports.remove(prev)) unawaited(prev.close());
+        });
+      }
+    }
   }
 
   /// Registers the receiver. Messages decrypted earlier are delivered now.
@@ -234,7 +309,14 @@ class SecureChannel {
     _noise.destroy();
     _incoming.reset();
     _outgoing.reset();
+    for (final stale in _drainingTransports.toList()) {
+      unawaited(stale.close());
+    }
+    _drainingTransports.clear();
     unawaited(_transport.close());
+    if (!identical(_transport, _controlTransport)) {
+      unawaited(_controlTransport.close());
+    }
     _onClosed?.call(reason);
   }
 

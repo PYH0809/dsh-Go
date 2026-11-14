@@ -641,6 +641,12 @@ class ChatController extends Notifier<ChatState> {
     return _retained(loading: _transcript.items.isEmpty);
   }
 
+  /// Initial follow window on a remote host when nothing is loaded yet: keeps
+  /// the first snapshot small enough to clear a cold cellular DataChannel
+  /// quickly; scrolling up fetches older turns through [loadOlder].
+  static const remoteInitialTurnWindow = TurnWindow(1, 1);
+  static const remoteInitialMaxMessages = 30;
+
   /// How long the app may be out of sight before a running conversation on a
   /// remote host stops streaming tokens ([_quiet]).
   static const quietAfter = Duration(seconds: 30);
@@ -796,6 +802,7 @@ class ChatController extends Notifier<ChatState> {
     // cards forwarded only by the previous watch and settled while it was away.
     // Retire local cards before replay; consent and in-flight answers stay intact.
     _retireHostRequests();
+    final initialRemote = !_sameClock && _transcript.oldestSeq == null;
     _sub = client
         .watch(
           sessionId,
@@ -803,6 +810,8 @@ class ChatController extends Notifier<ChatState> {
             assistantStream: !_quiet,
             includeSyncEvents: true,
             activate: true,
+            turnWindow: initialRemote ? remoteInitialTurnWindow : const TurnWindow(50, 2),
+            maxMessages: initialRemote ? remoteInitialMaxMessages : 500,
             activationAllowed: () {
               if (!current()) return false;
               return _activationAllowed;

@@ -1112,14 +1112,22 @@ class _SessionWatch {
     if (options.turnWindow != null) 'turnWindow': options.turnWindow!.toJson(),
   };
 
-  /// Sleeps [delay]; false when the watch stopped meanwhile.
+  /// Back off within this generation, but do not delay a ready successor.
   Future<bool> _sleep(Duration delay) async {
+    final current = client.mux.generation;
+    if (current != null && !identical(current, _epochGeneration)) return !_stopped;
     final wake = _wake = Completer<bool>();
-    final timer = Timer(delay, () {
-      if (!wake.isCompleted) wake.complete(true);
-    });
+    void done(bool ready) {
+      if (!wake.isCompleted) wake.complete(ready);
+    }
+
+    final sub = client.mux.generations.listen((generation) {
+      if (!identical(generation, _epochGeneration)) done(true);
+    }, onDone: () => done(false));
+    final timer = Timer(delay, () => done(true));
     final awake = await wake.future;
     timer.cancel();
+    await sub.cancel();
     return awake && !_stopped;
   }
 

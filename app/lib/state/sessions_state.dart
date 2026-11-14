@@ -13,6 +13,7 @@ import 'connection_state.dart';
 import 'hosts_state.dart';
 import 'read_list_cache.dart';
 import 'read_list_identity.dart';
+import 'session_list_reads.dart';
 import 'settings_state.dart';
 import 'workspaces_state.dart';
 
@@ -274,14 +275,20 @@ class SessionsController extends AsyncNotifier<List<SessionSummary>> {
       unawaited(sub.cancel());
       unawaited(workspaces.cancel());
     });
-    return _buildRead = _load(r, conn.client, seq, identity);
+    return _buildRead = _load(r, conn.client, seq, identity, fresh: false);
   }
 
-  Future<List<SessionSummary>> _load(Ref r, DshClient client, int seq, ReadListIdentity? identity) async {
+  Future<List<SessionSummary>> _load(
+    Ref r,
+    DshClient client,
+    int seq,
+    ReadListIdentity? identity, {
+    required bool fresh,
+  }) async {
     final List<SessionSummary> sessions;
     _listsOut++;
     try {
-      sessions = await client.listSessions();
+      sessions = await readSharedSessionList(client, consumer: SessionListConsumer.drawer, fresh: fresh);
     } finally {
       _listsOut--;
     }
@@ -554,7 +561,7 @@ class SessionsController extends AsyncNotifier<List<SessionSummary>> {
     final cache = r.read(readListCacheProvider);
     final activity = cache.beginRefresh(ReadListKind.sessions, identity);
     try {
-      final sessions = await _load(r, conn.client, seq, identity);
+      final sessions = await _load(r, conn.client, seq, identity, fresh: true);
       if (r.mounted && seq == _loadSeq) {
         state = AsyncData(sessions);
         cache.finishRefresh(ReadListKind.sessions, activity);

@@ -25,6 +25,7 @@ import '../companion/companion_signals.dart';
 import '../l10n/host_text.dart';
 import '../l10n/l10n.dart';
 import '../state/hosts_state.dart';
+import '../state/session_list_reads.dart';
 import '../ui/chat/media/media_format.dart' show chatTitleShown;
 import '../ui/chat/secret_mask.dart';
 import '../ui/chat/widgets/turn_failure_text.dart';
@@ -369,7 +370,7 @@ class DshAlertSource implements AlertSource {
   bool get connected => client.mux.generation != null;
 
   @override
-  Future<List<SessionSummary>> listSessions() => client.listSessions();
+  Future<List<SessionSummary>> listSessions() => readSharedSessionList(client, consumer: SessionListConsumer.alerts);
 
   @override
   Future<ToolCallPart?> approvalCall(ApprovalRequest request) async {

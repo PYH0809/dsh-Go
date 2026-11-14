@@ -1,12 +1,16 @@
+import 'package:dsh_app/remote/secret_store.dart';
 import 'package:dsh_app/runtime/runtime_bridge.dart';
 import 'package:dsh_app/runtime/runtime_state.dart';
+import 'package:dsh_app/state/hosts_state.dart';
 import 'package:dsh_app/state/settings_state.dart';
 import 'package:dsh_app/ui/onboarding/runtime_setup_page.dart';
 import 'package:dsh_app/ui/shell/root_gate.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
+import '../remote/support/fake_relay.dart';
 import '../safe_mode/support.dart';
 import 'golden_harness.dart';
 
@@ -82,5 +86,45 @@ void main() {
     await tester.pump(const Duration(milliseconds: 600));
     expect(find.byType(RuntimeSetupPage), findsOneWidget);
     expect(find.text('home'), findsNothing);
+  });
+
+  testWidgets('restored relay host starts connecting during splash after custom server origin settles', (tester) async {
+    const customOrigin = 'https://relay.example.com';
+    SharedPreferences.setMockInitialValues({
+      ActiveHostController.prefsKey: const HostRef.relay('mac', name: 'Mac').encode(),
+      RelayServerController.prefsKey: customOrigin,
+      'onboarding_local_declined': true,
+    });
+    final seenOrigins = <String>[];
+    final backends = <String, FakeRelayBackend>{};
+    final runtime = RecordingRuntime(const LocalRuntimeState(loaded: false));
+    usePhoneSurface(tester);
+    await tester.pumpWidget(
+      goldenApp(
+        home: const RootGate(home: Scaffold(body: Text('home'))),
+        brightness: Brightness.light,
+        overrides: [
+          secretStoreProvider.overrideWithValue(MemorySecretStore()),
+          localRuntimeProvider.overrideWith(() => runtime),
+          localRuntimeLogsProvider.overrideWith(_Logs.new),
+          settingsProvider.overrideWith(() => FakeSettings(const AppSettings(loaded: false))),
+          relayBackendProvider.overrideWith((ref) {
+            final origin = ref.watch(relayServerProvider) ?? defaultRelayServer;
+            seenOrigins.add(origin);
+            return backends.putIfAbsent(
+              origin,
+              () => FakeRelayBackend(user: sampleRelayUser),
+            );
+          }),
+        ],
+      ),
+    );
+    // Settings and local runtime are still unloaded (splash visible), yet
+    // once SharedPreferences settles, only the restored self-hosted relay connects.
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(find.text('home'), findsNothing, reason: 'still on splash while settings/runtime load');
+    expect(backends[defaultRelayServer]?.connected ?? const [], isEmpty);
+    expect(backends[customOrigin]?.connected, ['mac']);
   });
 }

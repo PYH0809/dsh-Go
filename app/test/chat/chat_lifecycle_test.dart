@@ -77,9 +77,11 @@ SessionSnapshotEvent _snapshot(String text, {String? requestId}) => SessionSnaps
   ],
 });
 
-ProviderContainer _container(_Client client) => ProviderContainer(
+ProviderContainer _container(_Client client, {bool isLocal = true}) => ProviderContainer(
   overrides: [
-    activeConnectionProvider.overrideWithValue(AsyncData(HostConnection(client: client, label: '本机', isLocal: true))),
+    activeConnectionProvider.overrideWithValue(
+      AsyncData(HostConnection(client: client, label: isLocal ? '本机' : 'Mac · 远程', isLocal: isLocal)),
+    ),
   ],
 );
 
@@ -304,4 +306,39 @@ void main() {
       container.dispose();
     });
   }
+
+  testWidgets('remote initial watch uses the compact first-screen window, while reconnects and local hosts keep the full window', (tester) async {
+    final local = _Client();
+    final localContainer = _container(local, isLocal: true);
+    final localSub = localContainer.listen(chatProvider('a'), (_, _) {});
+    expect(local.optionsSeen.single.turnWindow?.minMessages, 50);
+    expect(local.optionsSeen.single.turnWindow?.minTurns, 2);
+    expect(local.optionsSeen.single.maxMessages, 500);
+    localSub.close();
+    localContainer.dispose();
+
+    final remote = _Client();
+    final remoteContainer = _container(remote, isLocal: false);
+    final remoteSub = remoteContainer.listen(chatProvider('a'), (_, _) {});
+    expect(remote.optionsSeen.single.turnWindow?.minMessages, ChatController.remoteInitialTurnWindow.minMessages);
+    expect(remote.optionsSeen.single.turnWindow?.minTurns, ChatController.remoteInitialTurnWindow.minTurns);
+    expect(remote.optionsSeen.single.maxMessages, ChatController.remoteInitialMaxMessages);
+
+    // Once initial history has landed, a reconnect reopen keeps the standard
+    // window so resync continuity never widens a gap unnecessarily.
+    remote.watches.single.add(_snapshot('首屏内容'));
+    await tester.pump(const Duration(milliseconds: 40));
+    remote.watches.single.addError(StateError('network switched'));
+    await remote.watches.single.close();
+    await tester.pump();
+    remote.mux.connection.add(DshConnectionState.connected);
+    await tester.pump();
+    expect(remote.optionsSeen, hasLength(2));
+    expect(remote.optionsSeen.last.turnWindow?.minMessages, 50);
+    expect(remote.optionsSeen.last.turnWindow?.minTurns, 2);
+    expect(remote.optionsSeen.last.maxMessages, 500);
+
+    remoteSub.close();
+    remoteContainer.dispose();
+  });
 }

@@ -121,9 +121,11 @@ class InstalledPluginsController extends AsyncNotifier<List<PluginBundle>?> {
   DshClient? _client;
   int _loadSeq = 0;
   Future<List<PluginBundle>>? _buildRead;
+  Completer<void>? _initialChatSyncGate;
   List<PluginBundle> _latest = const [];
   final _removals = <String, PendingPluginRemoval>{};
   static const removalUndoWindow = Duration(seconds: 4);
+  static const remoteInitialSyncDeferCap = Duration(milliseconds: 1500);
 
   List<PluginBundle> _visible(List<PluginBundle> bundles) {
     final cache = ref.read(readListCacheProvider);
@@ -325,6 +327,8 @@ class InstalledPluginsController extends AsyncNotifier<List<PluginBundle>?> {
       if (event is HostReadyEvent) scheduleRefresh();
     });
     ref.onDispose(() {
+      if (_initialChatSyncGate case final gate? when !gate.isCompleted) gate.complete();
+      _initialChatSyncGate = null;
       unawaited(ownerChanges.cancel());
       for (final pending in _removals.values.toList()) {
         pending._closeWindow();
@@ -335,7 +339,7 @@ class InstalledPluginsController extends AsyncNotifier<List<PluginBundle>?> {
       unawaited(sub.cancel());
       unawaited(ready.cancel());
     });
-    final bundles = await (_buildRead = host.client.listBundles());
+    final bundles = await (_buildRead = _loadInitialBundles(r, host));
     if (!r.mounted) return null;
     if (seq != _loadSeq) return state.value;
     final cache = r.read(readListCacheProvider);
@@ -344,6 +348,39 @@ class InstalledPluginsController extends AsyncNotifier<List<PluginBundle>?> {
     _latest = bundles;
     _counted(bundles);
     return _visible(bundles);
+  }
+
+  Future<List<PluginBundle>> _loadInitialBundles(Ref r, PluginHost host) async {
+    if (!host.isLocal) {
+      final sessionId = r.read(currentSessionProvider);
+      if (sessionId != null && r.read(chatProvider(sessionId)).syncing) {
+        final gate = _initialChatSyncGate = Completer<void>();
+        void release() {
+          if (!gate.isCompleted) gate.complete();
+        }
+
+        final timer = Timer(remoteInitialSyncDeferCap, release);
+        final currentSub = r.listen<String?>(currentSessionProvider, (_, next) {
+          if (next != sessionId) release();
+        });
+        final syncSub = r.listen<bool>(
+          chatProvider(sessionId).select((s) => s.syncing),
+          (_, syncing) {
+            if (!syncing) release();
+          },
+          fireImmediately: true,
+        );
+        try {
+          await gate.future;
+        } finally {
+          timer.cancel();
+          currentSub.close();
+          syncSub.close();
+          if (identical(_initialChatSyncGate, gate)) _initialChatSyncGate = null;
+        }
+      }
+    }
+    return host.client.listBundles();
   }
 
   /// How many plugins 「已安装」 lists, for the usage statistics.
@@ -356,6 +393,9 @@ class InstalledPluginsController extends AsyncNotifier<List<PluginBundle>?> {
     final r = ref;
     final client = _client;
     if (client == null) return;
+    // An explicit refresh (opening the plugins page) releases any startup
+    // chat-sync deferral immediately while still coalescing into _buildRead.
+    if (_initialChatSyncGate case final gate? when !gate.isCompleted) gate.complete();
     // A build is already a refresh. Coalesce entry/HostReady kicks until
     // that build settles, so its Future cannot later overwrite a manual read.
     if (state.isLoading && _buildRead != null) {

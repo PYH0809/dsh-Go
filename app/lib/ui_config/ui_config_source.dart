@@ -12,6 +12,7 @@ import 'package:dsh_client/dsh_client.dart';
 import 'package:flutter/widgets.dart' show AppLifecycleState, WidgetsBinding;
 
 import '../l10n/l10n.dart';
+import '../state/session_list_reads.dart';
 import 'ui_config_model.dart';
 import 'ui_config_parser.dart' show UiMessages;
 import 'ui_config_schema.dart';
@@ -612,7 +613,7 @@ class DshUiRemoteHost implements UiRemoteHost {
 
   @override
   Future<String?> recentSessionId() async {
-    final sessions = await client.listSessions();
+    final sessions = await readSharedSessionList(client, consumer: SessionListConsumer.uiConfig);
     if (sessions.isEmpty) return null;
     final ranked = [...sessions]
       ..sort((a, b) {
