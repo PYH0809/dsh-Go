@@ -167,15 +167,18 @@ class _SegmentedPillState<T> extends State<SegmentedPill<T>> {
               children: [
                 if (fluid)
                   // The fluid tier's thumb is liquid (Libraries.dev Gooey, the tab recipe):
-                  // it stretches and trails as it slides, and is a plain pill at rest.
+                  // it stretches and trails as it slides, and draws a crisp anti-aliased
+                  // vector pill at rest (`crispWhenStill: true`) without Gooey fringe!
                   Positioned.fill(
                     child: Liquid(
                       blur: LiquidTabs.blur,
                       fill: thumb,
                       shadows: dark ? const [] : LiquidShadows.tabPill(Brightness.light),
+                      crispWhenStill: true,
                       child: Stack(
                         children: [
                           AnimatedPositioned(
+                            key: const ValueKey('segmented-pill-thumb'),
                             duration: _drag != null ? Duration.zero : AppMotion.thumbCurve.duration,
                             curve: AppMotion.thumbCurve,
                             left: left,
@@ -195,6 +198,7 @@ class _SegmentedPillState<T> extends State<SegmentedPill<T>> {
                   )
                 else
                   AnimatedPositioned(
+                    key: const ValueKey('segmented-pill-thumb'),
                     duration: _drag != null ? Duration.zero : AppMotion.of(context, AppMotion.standard),
                     curve: AppMotion.std,
                     left: left,

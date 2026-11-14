@@ -773,6 +773,12 @@ abstract final class Spots {
     title: (l) => l.botsPetQuiet,
     keywords: (l) => l.searchKwPetQuiet,
   );
+  static final petWhaleTail = SettingSpot(
+    'pet-whale-tail',
+    page: SettingsPageId.pets,
+    title: (l) => l.botsPetWhaleTail,
+    keywords: (l) => l.searchKwPetWhaleTail,
+  );
   static final petOutsideApp = SettingSpot(
     'pet-outside-app',
     page: SettingsPageId.pets,
@@ -899,6 +905,12 @@ abstract final class Spots {
     title: (l) => l.performanceFluid,
     keywords: (l) => l.searchKwFluidMotion,
     condition: SpotCondition.animationsOn,
+  );
+  static final petMascots = SettingSpot(
+    'pet-mascots',
+    page: SettingsPageId.performance,
+    title: (l) => l.botsPetMascots,
+    keywords: (l) => l.searchKwPetMascots,
   );
 
   // 通知.
@@ -1116,6 +1128,7 @@ final _rows = <SettingSpot>[
   Spots.wallpaper,
   Spots.petSize,
   Spots.petQuiet,
+  Spots.petWhaleTail,
   Spots.petOutsideApp,
   Spots.petDisplayWhen,
   Spots.petOverlayShows,
@@ -1135,6 +1148,7 @@ final _rows = <SettingSpot>[
   Spots.blur,
   Spots.animations,
   Spots.fluidMotion,
+  Spots.petMascots,
   Spots.notifyEnabled,
   Spots.notifyDone,
   Spots.notifyFailed,

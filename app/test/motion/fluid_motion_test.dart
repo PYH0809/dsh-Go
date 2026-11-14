@@ -7,6 +7,7 @@ import 'package:dsh_app/ui/common/fluid_bits.dart';
 import 'package:dsh_app/ui/common/pressable.dart';
 import 'package:dsh_app/ui/common/segmented_pill.dart';
 import 'package:dsh_app/ui/common/tile_grid.dart';
+import 'package:dsh_app/ui/fx/gooey/gooey.dart';
 import 'package:dsh_app/ui/shell/page_frame.dart';
 import 'package:dsh_app/ui/theme/theme.dart';
 import 'package:flutter/gestures.dart';
@@ -463,10 +464,19 @@ void main() {
       expect(ticks, 1);
     });
 
-    testWidgets('its thumb overshoots on the fluid tier and still lands on the segment', (tester) async {
+    testWidgets('its thumb overshoots on the fluid tier, uses Gooey while sliding, and draws crisp vector edges at rest', (
+      tester,
+    ) async {
       await tester.pumpWidget(shell(pill(0, onChanged: (_) {}), fluid: true));
-      double leftOf() => tester.getTopLeft(find.byType(DecoratedBox).at(1)).dx;
+      final thumbFinder = find.byKey(const ValueKey('segmented-pill-thumb'));
+      double leftOf() => tester.getTopLeft(thumbFinder).dx;
+      dynamic liquidRo() => tester.renderObject(find.descendant(of: find.byType(Liquid), matching: find.byWidgetPredicate((w) => w.runtimeType.toString() == '_LiquidLayer')));
+      expect((liquidRo() as dynamic).debugPaintedGooLastFrame, isFalse, reason: 'resting fluid pill bypasses Gooey threshold filter');
+
       await tester.pumpWidget(shell(pill(2, onChanged: (_) {}), fluid: true));
+      await tester.pump(const Duration(milliseconds: 16));
+      expect((liquidRo() as dynamic).debugPaintedGooLastFrame, isTrue, reason: 'Gooey liquid trail activates during motion');
+
       var furthest = 0.0;
       for (var i = 0; i < 60; i++) {
         await tester.pump(const Duration(milliseconds: 16));
@@ -474,6 +484,7 @@ void main() {
       }
       await tester.pumpAndSettle();
       expect(furthest, greaterThan(leftOf()));
+      expect((liquidRo() as dynamic).debugPaintedGooLastFrame, isFalse, reason: 'returns to crisp anti-aliased vector pill once settled');
     });
   });
 

@@ -37,6 +37,7 @@ class Liquid extends StatefulWidget {
     this.fill,
     this.shadows = const [],
     this.filterPadding = 24,
+    this.crispWhenStill = false,
     required this.child,
   });
 
@@ -55,6 +56,12 @@ class Liquid extends StatefulWidget {
 
   /// Extra room in px for pieces travelling outside the group's box.
   final double filterPadding;
+
+  /// When true (single-item tab indicators like `SegmentedPill`), resting frames
+  /// (`_engine.clean > 0`) draw the crisp anti-aliased vector pill directly
+  /// instead of running the 18x/60x alpha-threshold Gooey `saveLayer` passes
+  /// that quantize smooth pill edges into stair-stepped fringes.
+  final bool crispWhenStill;
 
   final Widget child;
 
@@ -102,6 +109,7 @@ class _LiquidState extends State<Liquid> with SingleTickerProviderStateMixin {
           fill: widget.fill ?? LiquidPalette.of(context).surface,
           shadows: widget.shadows,
           filterPadding: widget.filterPadding,
+          crispWhenStill: widget.crispWhenStill,
           reduced: AppMotion.reduced(context),
           child: widget.child,
         ),
@@ -334,6 +342,7 @@ class _LiquidLayer extends SingleChildRenderObjectWidget {
     required this.fill,
     required this.shadows,
     required this.filterPadding,
+    required this.crispWhenStill,
     required this.reduced,
     required super.child,
   });
@@ -344,6 +353,7 @@ class _LiquidLayer extends SingleChildRenderObjectWidget {
   final Color fill;
   final List<LiquidShadow> shadows;
   final double filterPadding;
+  final bool crispWhenStill;
   final bool reduced;
 
   @override
@@ -354,6 +364,7 @@ class _LiquidLayer extends SingleChildRenderObjectWidget {
     fill: fill,
     shadows: shadows,
     filterPadding: filterPadding,
+    crispWhenStill: crispWhenStill,
     reduced: reduced,
   );
 
@@ -365,6 +376,7 @@ class _LiquidLayer extends SingleChildRenderObjectWidget {
       ..fill = fill
       ..shadows = shadows
       ..filterPadding = filterPadding
+      ..crispWhenStill = crispWhenStill
       ..reduced = reduced;
   }
 }
@@ -380,6 +392,7 @@ class _RenderLiquid extends RenderProxyBox {
     required Color fill,
     required this._shadows,
     required this._filterPadding,
+    required this._crispWhenStill,
     required bool reduced,
   }) {
     this.fill = fill;
@@ -387,6 +400,15 @@ class _RenderLiquid extends RenderProxyBox {
   }
 
   final LiquidEngine _engine;
+  bool _crispWhenStill;
+  set crispWhenStill(bool value) {
+    if (_crispWhenStill == value) return;
+    _crispWhenStill = value;
+    markNeedsPaint();
+  }
+
+  @visibleForTesting
+  bool debugPaintedGooLastFrame = false;
 
   double get blur => _blur;
   double _blur;
@@ -425,9 +447,11 @@ class _RenderLiquid extends RenderProxyBox {
   final _shape = Paint();
   final _layer = Paint();
   final _isolate = Paint();
+  Color _rawFill = const Color(0xFFFFFFFF);
   set fill(Color value) {
     final opaque = value.withValues(alpha: 1);
-    if (opaque == _shape.color && value.a == _layer.color.a) return;
+    if (opaque == _shape.color && value.a == _layer.color.a && value == _rawFill) return;
+    _rawFill = value;
     _shape.color = opaque;
     _layer.color = Color.fromRGBO(0, 0, 0, value.a);
     markNeedsPaint();
@@ -519,9 +543,33 @@ class _RenderLiquid extends RenderProxyBox {
   void paint(PaintingContext context, Offset offset) {
     if (_engine.blobs.isNotEmpty) {
       _engine.step(this, SchedulerBinding.instance.currentFrameTimeStamp);
-      _paintLiquid(context.canvas, offset);
+      if (_crispWhenStill && (_engine.clean > 0 || _engine.reduced)) {
+        debugPaintedGooLastFrame = false;
+        _paintCrisp(context.canvas, offset);
+      } else {
+        debugPaintedGooLastFrame = true;
+        _paintLiquid(context.canvas, offset);
+      }
     }
     super.paint(context, offset);
+  }
+
+  void _paintCrisp(Canvas canvas, Offset offset) {
+    canvas
+      ..save()
+      ..translate(offset.dx, offset.dy);
+    for (final s in _shadows.reversed) {
+      if (s.inset) continue;
+      final shadowPaint = Paint()
+        ..color = s.color
+        ..maskFilter = s.blur > 0 ? MaskFilter.blur(BlurStyle.normal, s.blur / 2) : null;
+      canvas.save();
+      if (s.offset != Offset.zero) canvas.translate(s.offset.dx, s.offset.dy);
+      _engine.paint(canvas, shadowPaint);
+      canvas.restore();
+    }
+    _engine.paint(canvas, Paint()..color = _rawFill);
+    canvas.restore();
   }
 
   void _paintLiquid(Canvas canvas, Offset offset) {

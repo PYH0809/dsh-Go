@@ -8,7 +8,9 @@ import 'package:dsh_app/app.dart';
 import 'package:dsh_app/l10n/l10n.dart';
 import 'package:dsh_app/performance/performance_state.dart';
 import 'package:dsh_app/pets/pet_pack.dart';
+import 'package:dsh_app/pets/pet_prefs.dart';
 import 'package:dsh_app/pets/pet_sheets.dart';
+import 'package:dsh_app/pets/pet_state.dart';
 import 'package:dsh_app/state/locale_state.dart';
 import 'package:dsh_app/state/ui_mode_state.dart';
 import 'package:dsh_app/ui/common/app_sheet.dart';
@@ -377,6 +379,27 @@ void main() {
       await tester.pumpAndSettle();
       expect(c.read(performancePrefsProvider).fluid, isNull);
       expect(scoped(tester), isTrue);
+    });
+
+    testWidgets('mascots switch toggles both chat pet and status bar whale tail together', (tester) async {
+      window(tester);
+      final c = await mount(tester, const PerformancePage());
+      await tester.pumpAndSettle();
+      expect(c.read(petPrefsProvider).enabled, isTrue);
+      expect(c.read(petPrefsProvider).whaleTail, isTrue);
+
+      final mascots = find.byKey(const ValueKey('performance-mascots'));
+      await tester.ensureVisible(mascots);
+      await tester.tap(mascots);
+      await tester.pumpAndSettle();
+      expect(c.read(petPrefsProvider).packId, noPetId);
+      expect(c.read(petPrefsProvider).enabled, isFalse);
+      expect(c.read(petPrefsProvider).whaleTail, isFalse);
+
+      await tester.tap(mascots);
+      await tester.pumpAndSettle();
+      expect(c.read(petPrefsProvider).enabled, isTrue);
+      expect(c.read(petPrefsProvider).whaleTail, isTrue);
     });
   });
 

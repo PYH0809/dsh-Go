@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../l10n/l10n.dart';
 import '../../performance/performance_state.dart';
+import '../../pets/pet_prefs.dart';
 import '../shell/page_frame.dart';
 import '../theme/app_icons.dart';
 import 'settings_widgets.dart';
@@ -40,6 +41,8 @@ class PerformancePage extends ConsumerWidget {
     final defaults = ref.watch(performanceDefaultsProvider);
     final thermal = ref.watch(performanceProvider.select((s) => s.thermalLightweight));
     final notifier = ref.read(performancePrefsProvider.notifier);
+    final petPrefs = ref.watch(petPrefsProvider);
+    final mascotsOn = petPrefs.enabled || petPrefs.whaleTail;
     return AppPage.list(
       title: l10n.performanceTitle,
       children: [
@@ -108,6 +111,13 @@ class PerformancePage extends ConsumerWidget {
                 value: defaults.fluidMotion,
                 onChanged: (value) => unawaited(notifier.setFluid(value)),
               ),
+            SettingsSwitchTile(
+              key: const ValueKey('performance-mascots'),
+              spot: Spots.petMascots,
+              subtitle: l10n.botsPetMascotsSubtitle,
+              value: mascotsOn,
+              onChanged: (value) => unawaited(ref.read(petPrefsProvider.notifier).setMascotsEnabled(value)),
+            ),
             if (prefs.blur != null || prefs.animations != null || prefs.fluid != null)
               SettingsTile(
                 key: const ValueKey('performance-reset-effects'),

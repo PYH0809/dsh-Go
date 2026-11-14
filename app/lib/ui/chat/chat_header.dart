@@ -10,6 +10,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../l10n/l10n.dart';
+import '../../pets/pet_prefs.dart';
 import '../../state/header_schedule_state.dart';
 import '../agents/header_agents.dart';
 import '../common/fluid_bits.dart';
@@ -232,7 +233,15 @@ class _ChatHeaderState extends ConsumerState<ChatHeader> {
                                       status: Row(
                                         mainAxisSize: MainAxisSize.min,
                                         children: [
-                                          StatusDot(tone: widget.status.tone, size: _dot),
+                                          Consumer(
+                                            builder: (context, ref, _) => StatusDot(
+                                              tone: widget.status.tone,
+                                              size: _dot,
+                                              pulse: ref.watch(
+                                                petPrefsProvider.select((p) => p.enabled || p.whaleTail),
+                                              ),
+                                            ),
+                                          ),
                                           const SizedBox(width: _dotGap),
                                           Flexible(
                                             child: _StatusLabel(

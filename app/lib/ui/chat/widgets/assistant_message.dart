@@ -411,16 +411,26 @@ class _StallDotState extends State<_StallDot> with SingleTickerProviderStateMixi
   @override
   void initState() {
     super.initState();
-    _arm();
   }
 
   void _arm() {
     _wait?.cancel();
+    if (!GlassBackdropScope.animationsEnabledOf(context)) {
+      _breath.stop();
+      if (_shown) setState(() => _shown = false);
+      return;
+    }
     _wait = Timer(_StallDot._after, () {
-      if (!mounted) return;
+      if (!mounted || !GlassBackdropScope.animationsEnabledOf(context)) return;
       setState(() => _shown = true);
       unawaited(_breath.repeat(reverse: true));
     });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _arm();
   }
 
   @override

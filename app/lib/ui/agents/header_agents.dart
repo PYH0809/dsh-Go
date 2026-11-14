@@ -12,6 +12,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../l10n/l10n.dart';
+import '../../pets/pet_prefs.dart';
 import '../../state/agents_state.dart';
 import '../../state/sessions_state.dart';
 import '../common/fluid_bits.dart';
@@ -186,7 +187,13 @@ class HeaderAgentsKey extends StatelessWidget {
               // frames while nothing runs (#1094).
               child: TickerMode(
                 enabled: running,
-                child: StatusDot(tone: running ? StatusTone.busy : StatusTone.idle, size: 7),
+                child: Consumer(
+                  builder: (context, ref, _) => StatusDot(
+                    tone: running ? StatusTone.busy : StatusTone.idle,
+                    size: 7,
+                    pulse: ref.watch(petPrefsProvider.select((p) => p.enabled || p.whaleTail)),
+                  ),
+                ),
               ),
             ),
           ),

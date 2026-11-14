@@ -114,6 +114,17 @@ class PetSettingsPage extends ConsumerWidget {
             ],
           ),
         ),
+        SettingsSection(
+          children: [
+            SettingsSwitchTile(
+              key: const ValueKey('pet-whale-tail'),
+              spot: Spots.petWhaleTail,
+              subtitle: l10n.botsPetWhaleTailSubtitle,
+              value: prefs.whaleTail,
+              onChanged: (v) => unawaited(notifier.setWhaleTail(v)),
+            ),
+          ],
+        ),
       ],
     );
   }

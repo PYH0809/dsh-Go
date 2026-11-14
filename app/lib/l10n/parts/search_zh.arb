@@ -60,6 +60,8 @@
   "searchKwAppIcon": "启动图标,App 图标,图标",
   "searchKwPetSize": "宠物大小,宠物尺寸",
   "searchKwPetQuiet": "安静,宠物安静",
+  "searchKwPetWhaleTail": "鲸尾,金鱼尾巴,鱼尾,状态条尾巴,胶囊尾巴,省电",
+  "searchKwPetMascots": "宠物,桌宠,鲸尾,金鱼尾巴,鱼尾,关闭宠物,隐藏尾巴,省电,功耗",
   "searchKwPetOutside": "悬浮窗,桌面宠物,宠物悬浮",
   "searchKwPetDisplayWhen": "宠物显示,显示时机",
   "searchKwPetOverlayShows": "悬浮伙伴,小屋里的她,像素宠物,Live2D",
