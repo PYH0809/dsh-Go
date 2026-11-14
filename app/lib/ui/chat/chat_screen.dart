@@ -1972,52 +1972,50 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
                   ),
                   LayoutId(
                     id: _Slot.palette,
-                    child: RepaintBoundary(
-                      child: Center(
-                        child: ConstrainedBox(
-                          constraints: const BoxConstraints(maxWidth: AppSpace.floatingWidth),
-                          child: ListenableBuilder(
-                            listenable: Listenable.merge([_input, _mentions]),
-                            builder: (context, _) {
-                              // The `@` word at the caret wins over a "/" line.
-                              final live = connected && !readOnly;
-                              final mention = live && _mentions.isOpen;
-                              final content = live && !mention ? _slashContent(commands) : null;
-                              // The pet steps aside while a panel is up.
-                              return PopScope<Object?>(
-                                canPop: content == null,
-                                onPopInvokedWithResult: (didPop, _) {
-                                  if (!didPop) _dismissSlashPalette();
-                                },
-                                child: PetCover(
-                                  active: mention || content != null,
-                                  child: AnimatedSwitcher(
-                                    duration: AppMotion.of(context, AppMotion.quick),
-                                    switchInCurve: AppMotion.enter,
-                                    switchOutCurve: AppMotion.exit,
-                                    transitionBuilder: (child, animation) => FadeTransition(
-                                      opacity: animation,
-                                      child: ScaleTransition(
-                                        alignment: Alignment.bottomCenter,
-                                        scale: Tween(begin: 0.96, end: 1.0).animate(animation),
-                                        child: child,
-                                      ),
+                    child: Center(
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: AppSpace.floatingWidth),
+                        child: ListenableBuilder(
+                          listenable: Listenable.merge([_input, _mentions]),
+                          builder: (context, _) {
+                            // The `@` word at the caret wins over a "/" line.
+                            final live = connected && !readOnly;
+                            final mention = live && _mentions.isOpen;
+                            final content = live && !mention ? _slashContent(commands) : null;
+                            // The pet steps aside while a panel is up.
+                            return PopScope<Object?>(
+                              canPop: content == null,
+                              onPopInvokedWithResult: (didPop, _) {
+                                if (!didPop) _dismissSlashPalette();
+                              },
+                              child: PetCover(
+                                active: mention || content != null,
+                                child: AnimatedSwitcher(
+                                  duration: AppMotion.of(context, AppMotion.quick),
+                                  switchInCurve: AppMotion.enter,
+                                  switchOutCurve: AppMotion.exit,
+                                  transitionBuilder: (child, animation) => FadeTransition(
+                                    opacity: animation,
+                                    child: ScaleTransition(
+                                      alignment: Alignment.bottomCenter,
+                                      scale: Tween(begin: 0.96, end: 1.0).animate(animation),
+                                      child: child,
                                     ),
-                                    child: mention
-                                        ? MentionPicker(key: const ValueKey('mention'), controller: _mentions)
-                                        : content == null
-                                        ? const SizedBox(key: ValueKey('none'), width: double.infinity)
-                                        : TextFieldTapRegion(
-                                            key: ValueKey(content is PaletteHint),
-                                            groupId: _composerGroup,
-                                            onTapOutside: (_) => _dismissSlashPalette(),
-                                            child: SlashPalette(content: content, onPick: _pick),
-                                          ),
                                   ),
+                                  child: mention
+                                      ? MentionPicker(key: const ValueKey('mention'), controller: _mentions)
+                                      : content == null
+                                      ? const SizedBox(key: ValueKey('none'), width: double.infinity)
+                                      : TextFieldTapRegion(
+                                          key: ValueKey(content is PaletteHint),
+                                          groupId: _composerGroup,
+                                          onTapOutside: (_) => _dismissSlashPalette(),
+                                          child: SlashPalette(content: content, onPick: _pick),
+                                        ),
                                 ),
-                              );
-                            },
-                          ),
+                              ),
+                            );
+                          },
                         ),
                       ),
                     ),
@@ -2525,11 +2523,10 @@ class _HeaderAside extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final duration = AppMotion.of(context, AppMotion.standard);
-    return RepaintBoundary(
-      child: Stack(
-        // The header's own fade runs past its bar.
-        clipBehavior: Clip.none,
-        children: [
+    return Stack(
+      // The header's own fade runs past its bar.
+      clipBehavior: Clip.none,
+      children: [
         Positioned(
           left: 0,
           right: 0,
@@ -2555,8 +2552,7 @@ class _HeaderAside extends StatelessWidget {
             ),
           ),
         ),
-        ],
-      ),
+      ],
     );
   }
 }
@@ -2721,7 +2717,8 @@ class _ChatKeyboardInsetScope extends InheritedWidget {
   bool updateShouldNotify(_ChatKeyboardInsetScope oldWidget) => inset != oldWidget.inset;
 }
 
-/// Wraps `_Slot.composer` in a single `RepaintBoundary` + `BackdropGroup`.
+/// Wraps `_Slot.composer` in a single `BackdropGroup` without an ancestor
+/// `RepaintBoundary` (which would isolate `BackdropFilter` into an empty layer).
 class _ComposerVeilScope extends StatelessWidget {
   const _ComposerVeilScope({required this.child});
 
@@ -2729,13 +2726,12 @@ class _ComposerVeilScope extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scoped = BackdropGroup(
+    return BackdropGroup(
       child: SafeArea(
         top: false,
         minimum: const EdgeInsets.only(bottom: 8),
         child: child,
       ),
     );
-    return AppBackdrop.snapshotCaching ? RepaintBoundary(child: scoped) : scoped;
   }
 }

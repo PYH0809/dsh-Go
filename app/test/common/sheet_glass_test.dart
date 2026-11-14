@@ -7,6 +7,7 @@ import 'package:dsh_app/ui/common/app_sheet.dart';
 import 'package:dsh_app/ui/common/discard_guard.dart';
 import 'package:dsh_app/ui/theme/theme.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 class _Counted extends StatefulWidget {
@@ -145,11 +146,7 @@ void main() {
   testWidgets('IME keyboard rise lifts the sheet outside GlassSurface without resizing glass or rebuilding content', (
     tester,
   ) async {
-    GlassSurface.shadowCaching = true;
-    addTearDown(() {
-      GlassSurface.shadowCaching = false;
-      tester.view.resetViewInsets();
-    });
+    addTearDown(tester.view.resetViewInsets);
     final oldDisableShadows = debugDisableShadows;
     debugDisableShadows = false;
     try {
@@ -288,5 +285,29 @@ void main() {
     await tester.pumpAndSettle();
     expect(_blurring(tester), isTrue, reason: 'resting modal sheet must sample real sigma=24 backdrop blur in production');
     expect(_settled(tester), 1);
+
+    // Architectural guard: no RenderRepaintBoundary may sit between a sheet's
+    // RenderBackdropFilter and its ModalRoute page root (an extra RepaintBoundary
+    // inside the route isolates BackdropFilter into an empty offscreen texture on
+    // Impeller OpenGLES so nothing blurs).
+    final filter = tester.renderObject<RenderBackdropFilter>(_sheetBlur);
+    final bottomSheet = tester.renderObject(find.byType(BottomSheet));
+    RenderObject? node = filter.parent;
+    while (node != null && !identical(node, bottomSheet.parent)) {
+      final isPlainOffsetBoundary =
+          node is RenderRepaintBoundary ||
+          (node.isRepaintBoundary && node is! RenderOpacity && node is! RenderAnimatedOpacity);
+      expect(
+        isPlainOffsetBoundary,
+        isFalse,
+        reason: 'ancestor repaint boundary inside BottomSheet breaks BackdropFilter sampling on Impeller OpenGLES',
+      );
+      node = node.parent;
+    }
+    expect(
+      find.descendant(of: find.byType(GlassSurface), matching: find.byType(SnapshotWidget)),
+      findsNothing,
+      reason: 'GlassSurface must never wrap outer shadows in SnapshotWidget textures',
+    );
   });
 }

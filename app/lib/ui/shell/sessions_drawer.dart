@@ -320,11 +320,12 @@ class SessionsDrawer extends ConsumerWidget {
       ),
     );
 
+    final isolated = RepaintBoundary(child: content);
     final motion = drawerMotion;
     if (motion == null) {
-      return GlassSurface(tier: GlassTier.sheet, borderRadius: radius, child: content);
+      return GlassSurface(tier: GlassTier.sheet, borderRadius: radius, child: isolated);
     }
-    return SlidingGlass(motion: motion, tier: GlassTier.sheet, borderRadius: radius, child: content);
+    return SlidingGlass(motion: motion, tier: GlassTier.sheet, borderRadius: radius, child: isolated);
   }
 }
 

@@ -4,13 +4,21 @@ import 'package:flutter/material.dart';
 /// A full-resolution picture, optionally read only when its page is built.
 @immutable
 class ViewerImage {
-  const ViewerImage({required this.name, required ImageProvider this.image, this.heroTag}) : load = null;
+  const ViewerImage({required this.name, required ImageProvider this.image, this.preview, this.heroTag}) : load = null;
 
-  const ViewerImage.lazy({required this.name, required Future<ImageProvider> Function() this.load, this.heroTag})
-    : image = null;
+  const ViewerImage.lazy({
+    required this.name,
+    required Future<ImageProvider> Function() this.load,
+    this.preview,
+    this.heroTag,
+  }) : image = null;
 
   final String name;
   final ImageProvider? image;
+
+  /// Already-decoded thumbnail provider shown without a blank frame while [image]
+  /// finishes decoding at full resolution.
+  final ImageProvider? preview;
   final Future<ImageProvider> Function()? load;
   final Object? heroTag;
 }

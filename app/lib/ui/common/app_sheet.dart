@@ -281,20 +281,20 @@ class _SheetGlassState extends State<_SheetGlass> with SingleTickerProviderState
 
   @override
   Widget build(BuildContext context) {
+    // RepaintBoundary sits strictly INSIDE GlassSurface (`child`), NEVER outside
+    // `GlassSurface` / `BackdropFilter`: an ancestor RepaintBoundary creates an
+    // empty offscreen layer on Impeller OpenGLES so BackdropFilter blurs nothing!
     final child = AppBackdrop.snapshotCaching ? RepaintBoundary(child: widget.child) : widget.child;
     return NotificationListener<DraggableScrollableNotification>(
       onNotification: _onExtent,
       child: AnimatedBuilder(
         animation: _settled,
-        builder: (context, child) {
-          final surface = GlassSurface(
-            tier: GlassTier.sheet,
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(AppShape.xl)),
-            settled: _settled.value,
-            child: child,
-          );
-          return AppBackdrop.snapshotCaching ? RepaintBoundary(child: surface) : surface;
-        },
+        builder: (context, child) => GlassSurface(
+          tier: GlassTier.sheet,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(AppShape.xl)),
+          settled: _settled.value,
+          child: child,
+        ),
         child: child,
       ),
     );

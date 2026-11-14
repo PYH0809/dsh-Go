@@ -138,29 +138,28 @@ class _ChatHeaderState extends ConsumerState<ChatHeader> {
     final chrome = AdaptiveChrome.maybeOf(context);
     // The stack is only as tall as the bar; the fade runs 12dp past it, so it
     // must not clip (a clipped fade is a hard line right under the pills).
-    return RepaintBoundary(
-      child: Stack(
-        clipBehavior: Clip.none,
-        children: [
-          Positioned(
-            left: 0,
-            right: 0,
-            top: 0,
-            child: widget.scrolledUnder == null
-                ? const SizedBox.shrink()
-                : ValueListenableBuilder<double>(
-                    valueListenable: widget.scrolledUnder!,
-                    builder: (context, t, child) => t <= 0 ? const SizedBox.shrink() : Opacity(opacity: t, child: child),
-                    child: RepaintBoundary(child: TopFade(height: top + barHeight + 12)),
-                  ),
-          ),
-          Padding(
-            padding: EdgeInsets.fromLTRB(12, top, 12, 0),
-            child: BackdropGroup(
-              child: SizedBox(
-                key: const ValueKey('chat-header-bar'),
-                height: barHeight,
-                child: _HeaderRow(
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        Positioned(
+          left: 0,
+          right: 0,
+          top: 0,
+          child: widget.scrolledUnder == null
+              ? const SizedBox.shrink()
+              : ValueListenableBuilder<double>(
+                  valueListenable: widget.scrolledUnder!,
+                  builder: (context, t, child) => t <= 0 ? const SizedBox.shrink() : Opacity(opacity: t, child: child),
+                  child: RepaintBoundary(child: TopFade(height: top + barHeight + 12)),
+                ),
+        ),
+        Padding(
+          padding: EdgeInsets.fromLTRB(12, top, 12, 0),
+          child: BackdropGroup(
+            child: SizedBox(
+              key: const ValueKey('chat-header-bar'),
+              height: barHeight,
+              child: _HeaderRow(
                 titleFloor: titleFloor,
                 clockExtra: clockExtra,
                 children: [
@@ -298,11 +297,10 @@ class _ChatHeaderState extends ConsumerState<ChatHeader> {
                   ),
                 ],
               ),
-              ),
             ),
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 
