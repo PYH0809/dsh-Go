@@ -9,6 +9,7 @@ import 'package:dsh_app/l10n/l10n.dart';
 import 'package:dsh_app/performance/performance_state.dart';
 import 'package:dsh_app/pets/pet_sheets.dart';
 import 'package:dsh_app/state/locale_state.dart';
+import 'package:dsh_app/ui/chat/dock/dock_pill.dart' show DockSlot;
 import 'package:dsh_app/ui/chat/empty_actions.dart' show tipStart;
 import 'package:dsh_app/ui/common/scroll_edge_fade.dart' show ScrollEdgeFade;
 import 'package:dsh_app/ui/theme/theme.dart' show AppBackdrop, GlassSurface;
@@ -25,6 +26,7 @@ Future<void> testExecutable(FutureOr<void> Function() testMain) async {
   AppBackdrop.snapshotCaching = false;
   GlassSurface.shadowCaching = false;
   ScrollEdgeFade.skipLayerAtRest = false;
+  DockSlot.debugUnclipSettledShadow = false;
   // The chat page's pet is drawn only where a test asks for it
   // (test/pets/): elsewhere a sheet decoding in a stray real-async window
   // would make screens flicker between with and without a pet.

@@ -169,6 +169,15 @@ class DockSlot extends StatefulWidget {
   /// Null: nothing to show.
   final Widget? child;
 
+  static bool _unclipSettledShadow = true;
+
+  /// Whether settled slots drop their `ClipRect` so soft outer shadows spill
+  /// past the slot bottom.
+  static bool get unclipSettledShadow => _unclipSettledShadow;
+
+  @visibleForTesting
+  static set debugUnclipSettledShadow(bool value) => _unclipSettledShadow = value;
+
   @override
   State<DockSlot> createState() => _DockSlotState();
 }
@@ -184,6 +193,7 @@ class _DockSlotState extends State<DockSlot> {
     if (last == null) return const SizedBox(width: double.infinity);
     return ExpandReveal(
       open: child != null,
+      clipWhenExpanded: !DockSlot.unclipSettledShadow,
       duration: AppMotion.standard,
       curve: AppMotion.std,
       child: Padding(

@@ -82,13 +82,20 @@ class TodoBar extends StatefulWidget {
 }
 
 class _TodoBarState extends State<TodoBar> {
-  late bool _open = widget.initiallyOpen;
+  late final _open = ValueNotifier<bool>(widget.initiallyOpen);
   final _currentRow = GlobalKey();
+
+  @override
+  void dispose() {
+    _open.dispose();
+    super.dispose();
+  }
 
   void _toggle() {
     HapticFeedback.selectionClick();
-    setState(() => _open = !_open);
-    if (_open) {
+    final next = !_open.value;
+    _open.value = next;
+    if (next) {
       // Bring the item being worked on into view once the list is laid out.
       WidgetsBinding.instance.addPostFrameCallback((_) {
         final row = _currentRow.currentContext;
@@ -106,29 +113,33 @@ class _TodoBarState extends State<TodoBar> {
     final colors = theme.colorScheme;
     final dsh = DshColors.of(context);
     final s = widget.summary;
-    final header = Semantics(
-      button: true,
-      expanded: _open,
-      label: l10n.chatTodoSemantics(s.count, s.label),
-      onTapHint: _open ? l10n.chatCollapseTodos : l10n.chatExpandTodos,
-      excludeSemantics: true,
-      child: InkWell(
-        onTap: _toggle,
-        customBorder: const RoundedSuperellipseBorder(borderRadius: DockMetrics.shape),
-        child: DockRow(
-          leading: DockGlyph.icon(AppIcons.todo, color: colors.onSurfaceVariant),
-          content: _Line(summary: s),
-          accessory: DockProgressLine(fraction: s.fraction),
-          trailing: DockGlyph(
-            child: AnimatedRotation(
-              turns: _open ? 0.5 : 0,
-              duration: AppMotion.of(context, AppMotion.standard),
-              curve: AppMotion.std,
-              child: Icon(AppIcons.collapse, size: DockGlyph.iconSize, color: dsh.textTertiary),
+    final header = ValueListenableBuilder<bool>(
+      valueListenable: _open,
+      builder: (context, open, content) => Semantics(
+        button: true,
+        expanded: open,
+        label: l10n.chatTodoSemantics(s.count, s.label),
+        onTapHint: open ? l10n.chatCollapseTodos : l10n.chatExpandTodos,
+        excludeSemantics: true,
+        child: InkWell(
+          onTap: _toggle,
+          customBorder: const RoundedSuperellipseBorder(borderRadius: DockMetrics.shape),
+          child: DockRow(
+            leading: DockGlyph.icon(AppIcons.todo, color: colors.onSurfaceVariant),
+            content: content!,
+            accessory: DockProgressLine(fraction: s.fraction),
+            trailing: DockGlyph(
+              child: AnimatedRotation(
+                turns: open ? 0.5 : 0,
+                duration: AppMotion.of(context, AppMotion.standard),
+                curve: AppMotion.std,
+                child: Icon(AppIcons.collapse, size: DockGlyph.iconSize, color: dsh.textTertiary),
+              ),
             ),
           ),
         ),
       ),
+      child: _Line(summary: s),
     );
     final maxList = (MediaQuery.sizeOf(context).height * TodoBar.maxListShare).clamp(0.0, TodoBar.maxList);
     final current = s.current;
@@ -143,23 +154,30 @@ class _TodoBarState extends State<TodoBar> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             header,
-            ExpandReveal(
-              open: _open,
-              duration: AppMotion.standard,
-              curve: AppMotion.std,
-              child: ConstrainedBox(
-                constraints: BoxConstraints(maxHeight: maxList),
-                child: ScrollEdgeFade(
-                  // Every row is built (lists are short): the current one
-                  // can be scrolled to however far down it is.
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.fromLTRB(DockMetrics.edge, 0, DockMetrics.edge, DockMetrics.edge),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        for (final todo in s.todos)
-                          TodoDockRow(key: identical(todo, current) ? _currentRow : null, todo: todo),
-                      ],
+            ValueListenableBuilder<bool>(
+              valueListenable: _open,
+              builder: (context, open, child) => ExpandReveal(
+                open: open,
+                keepState: true,
+                duration: AppMotion.standard,
+                curve: AppMotion.std,
+                child: child!,
+              ),
+              child: RepaintBoundary(
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(maxHeight: maxList),
+                  child: ScrollEdgeFade(
+                    // Every row is built (lists are short): the current one
+                    // can be scrolled to however far down it is.
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.fromLTRB(DockMetrics.edge, 0, DockMetrics.edge, DockMetrics.edge),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          for (final todo in s.todos)
+                            TodoDockRow(key: identical(todo, current) ? _currentRow : null, todo: todo),
+                        ],
+                      ),
                     ),
                   ),
                 ),
