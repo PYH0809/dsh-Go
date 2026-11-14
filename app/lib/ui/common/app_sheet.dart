@@ -126,10 +126,6 @@ Future<T?> showAppSheet<T>(
   );
 }
 
-/// A sheet's glass, which blurs only at rest. A moving blur re-samples what is
-/// behind it every frame, far over the frame budget on some GPUs; so while the
-/// route's animation runs or a finger has the sheet, the glass is an opaque
-/// fill, and once it stops the fill clears over [AppMotion.glassIn].
 /// Lifts the sheet above the software keyboard outside [_SheetGlass] while
 /// shielding its [child] subtree from per-frame `viewInsets` rebuilds.
 class _SheetKeyboardFrame extends StatelessWidget {
@@ -166,6 +162,10 @@ class _SheetKeyboardInset extends InheritedWidget {
   bool updateShouldNotify(_SheetKeyboardInset oldWidget) => inset != oldWidget.inset;
 }
 
+/// A sheet's glass, which blurs only at rest. A moving blur re-samples what is
+/// behind it every frame, far over the frame budget on some GPUs; so while the
+/// route's animation runs or a finger has the sheet, the glass is an opaque
+/// fill, and once it stops the fill clears over [AppMotion.glassIn].
 class _SheetGlass extends StatefulWidget {
   const _SheetGlass({this.held, required this.child});
 

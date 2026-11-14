@@ -514,10 +514,10 @@ class _TrajectoryListState extends State<TrajectoryList> {
     }
     final total = widget.total.inMilliseconds <= 0 ? const Duration(milliseconds: 1) : widget.total;
     final now = trace.start.add(widget.total);
-    // Short turns render identically with a flat Column (preserving exact
-    // golden subpixel coordinates); virtualize with ListView.builder once a
-    // turn exceeds 16 rows so 100+ step turns stay O(viewport)!
-    if (widget.controller != null && (rows.length > 16 || AppBackdrop.snapshotCaching)) {
+    // Short turns (<= 16 rows) build a single Column; longer turns virtualize
+    // with ListView.builder so 80+ step traces stay O(viewport) regardless of
+    // rendering cache flags!
+    if (widget.controller != null && rows.length > 16) {
       return ListView.builder(
         controller: widget.controller,
         padding: widget.padding,

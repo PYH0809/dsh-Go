@@ -477,6 +477,15 @@ class _RenderShadowStack extends RenderBox {
   }
 }
 
+/// Caches the outer glass shadow into a single [SnapshotWidget] texture at rest,
+/// and suspends texture allocation during consecutive resize frames while still
+/// painting the shadow directly via [CustomPaint] (no shadow flicker):
+/// - Set: [_RenderShadowResizeGate.performLayout] detects when `constraints.biggest`
+///   changes after initial layout, immediately sets `allowSnapshotting = false`
+///   (`markNeedsPaint()` is completely legal during layout on both Skia & Impeller,
+///   unlike `markNeedsBuild()` or mutating during `paint`), and calls [onResize].
+/// - Cleared: a two-frame idle post-frame callback clears `_resizing = false` once
+///   a full frame passes without another size change, recapturing 1 texture at rest.
 class _CachedGlassShadow extends StatefulWidget {
   const _CachedGlassShadow({required this.painter});
 
@@ -486,22 +495,10 @@ class _CachedGlassShadow extends StatefulWidget {
   State<_CachedGlassShadow> createState() => _CachedGlassShadowState();
 }
 
-/// Suspends [SnapshotWidget] texture allocation while the glass surface is
-/// actively resizing across consecutive frames (e.g. an expanding `TodoBar` or
-/// `DraggableScrollableSheet`), then recaptures once settled:
-/// - Set: [_RenderShadowSizeObserver] calls [_onSizeChanged] during `performLayout`
-///   whenever the shadow box size changes after its initial layout, setting
-///   `_resizing = true` and disabling `allowSnapshotting`.
-/// - Cleared: a two-frame idle debounce clears `_resizing = false` once an
-///   entire frame elapses without a newer `_settledTicket`, re-enabling texture
-///   caching without drawing `clipPath + blurRadius=32` during active drags.
 class _CachedGlassShadowState extends State<_CachedGlassShadow> {
   final _controller = SnapshotController(allowSnapshotting: true);
-  Size? _lastSize;
   bool _resizing = false;
   int _settledTicket = 0;
-
-  bool get _resizingValue => _resizing;
 
   void _sync() {
     final active = !_resizing && TickerMode.valuesOf(context).enabled;
@@ -511,27 +508,15 @@ class _CachedGlassShadowState extends State<_CachedGlassShadow> {
     }
   }
 
-  void _onSizeChanged(Size next) {
-    final previous = _lastSize;
-    _lastSize = next;
-    if (previous == null || previous == next) return;
-    final wasResizing = _resizing;
+  void _onLayoutResize() {
     _resizing = true;
-    if (_controller.allowSnapshotting) {
-      _controller.allowSnapshotting = false;
-      _controller.clear();
-    }
     final ticket = ++_settledTicket;
     SchedulerBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      if (!wasResizing && _resizing) setState(() {});
-      if (ticket != _settledTicket) return;
+      if (!mounted || ticket != _settledTicket) return;
       SchedulerBinding.instance.addPostFrameCallback((_) {
         if (!mounted || ticket != _settledTicket) return;
-        setState(() {
-          _resizing = false;
-          _sync();
-        });
+        _resizing = false;
+        _sync();
       });
       SchedulerBinding.instance.ensureVisualUpdate();
     });
@@ -557,42 +542,61 @@ class _CachedGlassShadowState extends State<_CachedGlassShadow> {
   }
 
   @override
-  Widget build(BuildContext context) => _ShadowSizeObserver(
-    onSizeChanged: _onSizeChanged,
+  Widget build(BuildContext context) => _ShadowResizeGate(
+    controller: _controller,
+    onLayoutResize: _onLayoutResize,
     child: SnapshotWidget(
       controller: _controller,
       // SnapshotWidget also invalidates its image when MediaQuery's DPR changes.
       autoresize: true,
-      child: _resizingValue ? const SizedBox.expand() : CustomPaint(painter: widget.painter),
+      child: CustomPaint(painter: widget.painter),
     ),
   );
 }
 
-class _ShadowSizeObserver extends SingleChildRenderObjectWidget {
-  const _ShadowSizeObserver({required this.onSizeChanged, required super.child});
+class _ShadowResizeGate extends SingleChildRenderObjectWidget {
+  const _ShadowResizeGate({
+    required this.controller,
+    required this.onLayoutResize,
+    required super.child,
+  });
 
-  final ValueChanged<Size> onSizeChanged;
+  final SnapshotController controller;
+  final VoidCallback onLayoutResize;
 
   @override
-  RenderObject createRenderObject(BuildContext context) => _RenderShadowSizeObserver(onSizeChanged);
+  RenderObject createRenderObject(BuildContext context) =>
+      _RenderShadowResizeGate(controller, onLayoutResize);
 
   @override
-  void updateRenderObject(BuildContext context, _RenderShadowSizeObserver renderObject) =>
-      renderObject.onSizeChanged = onSizeChanged;
+  void updateRenderObject(BuildContext context, _RenderShadowResizeGate renderObject) {
+    renderObject
+      ..controller = controller
+      ..onLayoutResize = onLayoutResize;
+  }
 }
 
-class _RenderShadowSizeObserver extends RenderProxyBox {
-  _RenderShadowSizeObserver(this.onSizeChanged);
+class _RenderShadowResizeGate extends RenderProxyBox {
+  _RenderShadowResizeGate(this.controller, this.onLayoutResize);
 
-  ValueChanged<Size> onSizeChanged;
-  Size? _reported;
+  SnapshotController controller;
+  VoidCallback onLayoutResize;
+  Size? _lastLaidOutSize;
 
   @override
   void performLayout() {
     final next = constraints.biggest;
-    if (_reported != next) {
-      _reported = next;
-      onSizeChanged(next);
+    final previous = _lastLaidOutSize;
+    _lastLaidOutSize = next;
+    if (previous != null && previous != next) {
+      // Legal during performLayout: SnapshotController only calls markNeedsPaint()
+      // on _RenderSnapshotWidget (never markNeedsBuild), preventing intermediate
+      // texture allocation on this exact frame while CustomPaint draws directly!
+      if (controller.allowSnapshotting) {
+        controller.allowSnapshotting = false;
+        controller.clear();
+      }
+      onLayoutResize();
     }
     super.performLayout();
   }

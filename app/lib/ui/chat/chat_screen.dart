@@ -2695,9 +2695,6 @@ class _RouteInteractionScopeState extends State<_RouteInteractionScope> {
   }
 }
 
-/// Wraps `_Slot.composer` in a single `RepaintBoundary` + `BackdropGroup`, and
-/// skips offscreen `BackdropFilter` readbacks when the solid gradient
-/// `BackdropVeil` behind it has no custom wallpaper picture.
 class _ChatKeyboardInsetHost extends StatelessWidget {
   const _ChatKeyboardInsetHost({required this.child});
 
@@ -2722,6 +2719,9 @@ class _ChatKeyboardInsetScope extends InheritedWidget {
   bool updateShouldNotify(_ChatKeyboardInsetScope oldWidget) => inset != oldWidget.inset;
 }
 
+/// Wraps `_Slot.composer` in a single `RepaintBoundary` + `BackdropGroup`, and
+/// skips offscreen `BackdropFilter` readbacks when the solid gradient
+/// `BackdropVeil` behind it has no custom wallpaper picture.
 class _ComposerVeilScope extends StatelessWidget {
   const _ComposerVeilScope({required this.child});
 
