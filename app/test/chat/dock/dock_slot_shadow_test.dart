@@ -23,8 +23,8 @@ Future<Uint8List> _pixels(WidgetTester tester) async {
 }
 
 void main() {
-  setUp(() => DockSlot.unclipSettledShadow = true);
-  tearDown(() => DockSlot.unclipSettledShadow = false);
+  setUp(() => DockSlot.debugUnclipSettledShadow = true);
+  tearDown(() => DockSlot.debugUnclipSettledShadow = false);
 
   testWidgets('DockSlot clips its shadow during motion and removes dismissed content', (tester) async {
     tester.view.devicePixelRatio = 1;

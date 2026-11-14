@@ -169,11 +169,14 @@ class DockSlot extends StatefulWidget {
   /// Null: nothing to show.
   final Widget? child;
 
+  static bool _unclipSettledShadow = true;
+
   /// Whether settled slots drop their `ClipRect` so soft outer shadows spill
-  /// past the slot bottom. Disabled in `flutter_test_config.dart` so existing
-  /// clipped golden baselines stay 0px identical while `dock_slot_shadow_test`
-  /// verifies unclipped shadow pixels explicitly.
-  static bool unclipSettledShadow = true;
+  /// past the slot bottom.
+  static bool get unclipSettledShadow => _unclipSettledShadow;
+
+  @visibleForTesting
+  static set debugUnclipSettledShadow(bool value) => _unclipSettledShadow = value;
 
   @override
   State<DockSlot> createState() => _DockSlotState();

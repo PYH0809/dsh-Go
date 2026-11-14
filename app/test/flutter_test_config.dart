@@ -26,7 +26,7 @@ Future<void> testExecutable(FutureOr<void> Function() testMain) async {
   AppBackdrop.snapshotCaching = false;
   GlassSurface.shadowCaching = false;
   ScrollEdgeFade.skipLayerAtRest = false;
-  DockSlot.unclipSettledShadow = false;
+  DockSlot.debugUnclipSettledShadow = false;
   // The chat page's pet is drawn only where a test asks for it
   // (test/pets/): elsewhere a sheet decoding in a stray real-async window
   // would make screens flicker between with and without a pet.

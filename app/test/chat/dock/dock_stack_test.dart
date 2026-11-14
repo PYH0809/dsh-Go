@@ -560,8 +560,8 @@ void main() {
   });
 
   testWidgets('the accessory clips while rising but releases its shadow at full height', (tester) async {
-    DockSlot.unclipSettledShadow = true;
-    addTearDown(() => DockSlot.unclipSettledShadow = false);
+    DockSlot.debugUnclipSettledShadow = true;
+    addTearDown(() => DockSlot.debugUnclipSettledShadow = false);
     usePhoneView(tester);
     final height = ValueNotifier<double>(12);
     addTearDown(height.dispose);
