@@ -627,7 +627,7 @@ class _DrawerOverlay extends StatelessWidget {
                       child: Transform.translate(
                         offset: Offset((progress - 1) * (width + 24) * (fromRight ? -1 : 1), 0),
                         child: _ConditionalRepaintBoundary(
-                          enabled: progress < 1,
+                          enabled: progress > 0 && progress < 1,
                           child: drawer!,
                         ),
                       ),

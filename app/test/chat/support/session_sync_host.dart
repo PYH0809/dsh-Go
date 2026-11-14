@@ -205,7 +205,10 @@ class SyncHarness {
         followMode = 'hold';
         await follows.last.socket.ws.close(1001, 'G54 loss');
         await waitSync(
-          () => client.mux.generation?.number == 2 && follows.length >= 2,
+          () =>
+              client.mux.generation?.number == 2 &&
+              follows.length >= 2 &&
+              state.connection == DshConnectionState.connected,
           'new mux ready before snapshot',
         );
         expect(state.streamLost, isFalse);
