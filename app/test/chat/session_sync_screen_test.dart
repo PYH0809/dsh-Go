@@ -10,8 +10,10 @@ import 'package:dsh_app/state/features_state.dart';
 import 'package:dsh_app/state/header_schedule_state.dart';
 import 'package:dsh_app/state/plugins_state.dart';
 import 'package:dsh_app/state/connection_state.dart';
+import 'package:dsh_app/ui/chat/chat_header.dart';
 import 'package:dsh_app/ui/chat/chat_screen.dart';
 import 'package:dsh_app/ui/chat/composer.dart';
+import 'package:dsh_app/ui/chat/widgets/notice_row.dart';
 import 'package:dsh_app/ui/theme/app_icons.dart';
 import 'package:dsh_client/dsh_client.dart';
 import 'package:flutter/material.dart';
@@ -99,6 +101,84 @@ Future<void> _close(WidgetTester tester, SyncHarness h) async {
 
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
+  for (final locale in AppLocale.supported) {
+    for (final phase in [null, 'same-generation-follow-retry', 'new-mux-ready-snapshot-held']) {
+      testWidgets('ordinary sync appears only in the header: $locale, $phase', (tester) async {
+        AppLocale.use(locale);
+        addTearDown(() => AppLocale.use(AppLocale.zhCN));
+        final h = await _start(tester, runtime: _RuntimeSpy(), initialSnapshot: phase != null, phase: phase);
+        try {
+          expect(h.state.syncError, isNull);
+          expect(tester.widget<Composer>(find.byType(Composer)).sessionReady, isFalse);
+          expect(tester.widget<ChatHeader>(find.byType(ChatHeader)).status.label, appL10n.stateChatSynchronizing);
+          expect(find.text(appL10n.stateChatSynchronizing), findsOneWidget);
+          expect(find.byType(ErrorBanner), findsNothing);
+          expect(find.text(appL10n.stateChatSyncRetry), findsNothing);
+          expect(tester.widget<TextField>(find.byType(TextField)).decoration!.hintText, appL10n.chatComposerHint);
+          await tester.enterText(find.byType(TextField), 'draft while syncing');
+          await tester.pump();
+          await tester.tap(find.byIcon(AppIcons.send), warnIfMissed: false);
+          await pumpFrames(tester);
+          expect(_writes(h), isEmpty);
+          expect(tester.widget<TextField>(find.byType(TextField)).controller!.text, 'draft while syncing');
+          expect(tester.takeException(), isNull);
+        } finally {
+          await _close(tester, h);
+        }
+      });
+    }
+  }
+  for (final locale in AppLocale.supported) {
+    for (final terminal in ['recovery-timeout', 'watch-done']) {
+      testWidgets('$terminal retains visible sync recovery: $locale', (tester) async {
+        AppLocale.use(locale);
+        addTearDown(() => AppLocale.use(AppLocale.zhCN));
+        final h = await _start(tester, runtime: _RuntimeSpy());
+        try {
+          if (terminal == 'recovery-timeout') {
+            h.followMode = 'hold';
+            unawaited(h.chat.resync());
+            await _pumpUntil(tester, () => h.follows.length == 2);
+            await pumpFrames(tester);
+            expect(find.byType(ErrorBanner), findsNothing);
+            await tester.pump(const Duration(seconds: 11));
+          } else {
+            await tester.runAsync(h.client.mux.close);
+          }
+          await _pumpUntil(tester, () => h.state.streamLost && !h.state.resyncing);
+          await pumpFrames(tester);
+          expect(find.text(appL10n.stateChatSyncInterrupted), findsOneWidget);
+          expect(h.state.syncError, appL10n.stateChatSyncInterrupted);
+          final banner = tester.widget<ErrorBanner>(find.byType(ErrorBanner));
+          expect(banner.info, isFalse);
+          final retry = find.widgetWithText(TextButton, appL10n.stateChatSyncRetry);
+          expect(tester.widget<TextButton>(retry).onPressed, isNotNull);
+          expect(tester.widget<Composer>(find.byType(Composer)).sessionReady, isFalse);
+          await tester.tap(find.byIcon(AppIcons.stopGenerating), warnIfMissed: false);
+          await pumpFrames(tester);
+          expect(_writes(h), isEmpty);
+          if (terminal == 'recovery-timeout') {
+            await tester.tap(retry);
+            await _pumpUntil(tester, () => h.follows.length == 3);
+            await pumpFrames(tester);
+            expect(h.state.syncError, isNull);
+            expect(find.byType(ErrorBanner), findsNothing, reason: 'a new attempt is not a failure');
+            expect(tester.widget<Composer>(find.byType(Composer)).sessionReady, isFalse);
+            await tester.runAsync(() async {
+              h.follows.last.socket.item(h.follows.last.id, syncSnapshot(2));
+            });
+            await _pumpUntil(tester, () => h.state.controlReady && !h.state.resyncing);
+            await pumpFrames(tester);
+            expect(find.byType(ErrorBanner), findsNothing);
+            expect(tester.widget<Composer>(find.byType(Composer)).sessionReady, isTrue);
+          }
+          expect(tester.takeException(), isNull);
+        } finally {
+          await _close(tester, h);
+        }
+      });
+    }
+  }
   for (final scenario in [
     (phase: 'terminal-follow-error', input: 'button'),
     (phase: 'new-mux-ready-snapshot-held', input: 'button'),
@@ -112,10 +192,15 @@ void main() {
         expect(composer.connected, isTrue);
         expect(composer.running, isTrue);
         expect(composer.sessionReady, isFalse);
-        expect(find.text('重新同步'), findsOneWidget);
-        final size = tester.getSize(find.widgetWithText(TextButton, '重新同步'));
-        expect(size.width, greaterThanOrEqualTo(48));
-        expect(size.height, greaterThanOrEqualTo(48));
+        if (scenario.phase == 'terminal-follow-error') {
+          expect(find.text('重新同步'), findsOneWidget);
+          final size = tester.getSize(find.widgetWithText(TextButton, '重新同步'));
+          expect(size.width, greaterThanOrEqualTo(48));
+          expect(size.height, greaterThanOrEqualTo(48));
+        } else {
+          expect(find.byType(ErrorBanner), findsNothing);
+          expect(find.text('重新同步'), findsNothing);
+        }
         if (scenario.input == 'button') {
           await tester.tap(find.byIcon(AppIcons.stopGenerating), warnIfMissed: false);
         } else {
@@ -182,7 +267,9 @@ void main() {
         await tester.tap(retryButton);
         await _pumpUntil(tester, () => h.follows.length == 2);
         await pumpFrames(tester);
-        expect(find.text(appL10n.stateChatSyncInterrupted), findsOneWidget);
+        expect(h.state.syncError, isNull);
+        expect(find.byType(ErrorBanner), findsNothing, reason: 'retrying is not another sync failure');
+        expect(find.text(appL10n.stateChatSyncRetry), findsNothing);
         expect(find.text(reason), findsNothing, reason: 'a new follow no longer claims the old failure');
         expect(tester.takeException(), isNull, reason: 'waiting for the replacement snapshot remains laid out');
         await tester.runAsync(() async {

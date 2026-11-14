@@ -261,7 +261,6 @@ void main() {
             await tester.pump();
           }
           expect(c.busy(tester), isTrue);
-          final syncingMessage = next == 'sync' ? tester.widget<ErrorBanner>(find.byType(ErrorBanner)).message : null;
           c.sessions.finish(0, fail: fail);
           await pumpFrames(tester);
           c.trace(tester, 'old-${fail ? 'failure' : 'success'}-new-$next');
@@ -271,13 +270,10 @@ void main() {
           expect(c.drafts[next == 'create' ? 'new' : 'T']!.text, 'new B');
           expect(c.drafts['S'], isNull);
           expect(fixture.writes(c.h), isEmpty);
+          expect(find.byType(ErrorBanner), findsNothing);
           if (next == 'sync') {
-            // The existing informational synchronizing banner is legitimate.
-            expect(tester.widget<ErrorBanner>(find.byType(ErrorBanner)).message, syncingMessage);
             expect(c.h.container.read(chatProvider('T')).error, isNull);
             expect(c.h.container.read(chatProvider('T')).notice, isNull);
-          } else {
-            expect(find.byType(ErrorBanner), findsNothing);
           }
           final target = next == 'create' ? 'U' : 'T';
           if (next == 'create') {
