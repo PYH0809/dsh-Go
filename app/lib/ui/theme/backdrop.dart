@@ -36,6 +36,12 @@ class AppBackdrop extends StatelessWidget {
   /// A picture in place of the gradient; null: the gradient.
   final BackdropPicture? picture;
 
+  /// Whether static gradient and veil bands cache into GPU textures via
+  /// [SnapshotWidget]. Disabled in `flutter_test_config.dart` so existing
+  /// vector golden images do not incur ±1 LSB 8-bit texture quantization, while
+  /// dedicated cache tests (`backdrop_cache_test`, `glass_shadow_test`) enable it.
+  static bool snapshotCaching = true;
+
   @override
   Widget build(BuildContext context) {
     final s = DshSurfaces.of(context);
@@ -54,7 +60,7 @@ class AppBackdrop extends StatelessWidget {
           Positioned.fill(
             child: IgnorePointer(
               child: RepaintBoundary(
-                child: picture == null && !debugDisableShadows
+                child: picture == null && snapshotCaching
                     ? _CachedGradient(painter: painter)
                     : CustomPaint(painter: painter),
               ),
@@ -220,9 +226,9 @@ class BackdropVeil extends StatelessWidget {
         solidHeight: solidHeight,
         feather: feather,
         fromTop: fromTop,
-        child: debugDisableShadows
-            ? CustomPaint(size: Size.infinite, painter: bandPainter)
-            : _CachedBandVeil(painter: bandPainter),
+        child: AppBackdrop.snapshotCaching
+            ? _CachedBandVeil(solidHeight: solidHeight, painter: bandPainter)
+            : CustomPaint(size: Size.infinite, painter: bandPainter),
       ),
     );
   }
@@ -319,23 +325,57 @@ class _RenderVeilBandLayout extends RenderShiftedBox {
 }
 
 class _CachedBandVeil extends StatefulWidget {
-  const _CachedBandVeil({required this.painter});
+  const _CachedBandVeil({required this.solidHeight, required this.painter});
 
+  final ValueListenable<double> solidHeight;
   final _BandVeilPainter painter;
 
   @override
   State<_CachedBandVeil> createState() => _CachedBandVeilState();
 }
 
+/// Suspends [SnapshotWidget] texture allocation while [solidHeight] is actively
+/// changing across consecutive frames (e.g. keyboard or multi-line composer
+/// growth), then re-enables caching on the next settled frame:
+/// - Set: `_onHeightChanged` sets `_resizing = true`, disables `allowSnapshotting`,
+///   and schedules one post-frame callback.
+/// - Cleared: the post-frame callback clears `_resizing = false` once a frame
+///   passes without a newer `_settledTicket`, restoring texture caching at rest.
 class _CachedBandVeilState extends State<_CachedBandVeil> {
   final _controller = SnapshotController(allowSnapshotting: true);
+  late double _lastHeight = widget.solidHeight.value;
+  bool _resizing = false;
+  int _settledTicket = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.solidHeight.addListener(_onHeightChanged);
+  }
 
   void _sync() {
-    final active = TickerMode.valuesOf(context).enabled;
+    final active = !_resizing && TickerMode.valuesOf(context).enabled;
     if (_controller.allowSnapshotting != active) {
       _controller.allowSnapshotting = active;
       if (!active) _controller.clear();
     }
+  }
+
+  void _onHeightChanged() {
+    final next = widget.solidHeight.value;
+    if (next == _lastHeight) return;
+    _lastHeight = next;
+    _resizing = true;
+    if (_controller.allowSnapshotting) {
+      _controller.allowSnapshotting = false;
+      _controller.clear();
+    }
+    final ticket = ++_settledTicket;
+    SchedulerBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || ticket != _settledTicket) return;
+      _resizing = false;
+      _sync();
+    });
   }
 
   @override
@@ -347,6 +387,11 @@ class _CachedBandVeilState extends State<_CachedBandVeil> {
   @override
   void didUpdateWidget(_CachedBandVeil oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.solidHeight, widget.solidHeight)) {
+      oldWidget.solidHeight.removeListener(_onHeightChanged);
+      widget.solidHeight.addListener(_onHeightChanged);
+      _lastHeight = widget.solidHeight.value;
+    }
     if (widget.painter.shouldRepaint(oldWidget.painter)) {
       _controller.clear();
     }
@@ -355,6 +400,7 @@ class _CachedBandVeilState extends State<_CachedBandVeil> {
 
   @override
   void dispose() {
+    widget.solidHeight.removeListener(_onHeightChanged);
     _controller.dispose();
     super.dispose();
   }

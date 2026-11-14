@@ -114,6 +114,11 @@ class GlassSurface extends StatelessWidget {
 
   bool get _isStadium => stadium || (!circle && borderRadius == null && tier == GlassTier.pill);
 
+  /// Whether rectangular/stadium `sheet` and `chrome` outer shadows cache into
+  /// GPU textures via [SnapshotWidget]. Disabled in `flutter_test_config.dart`
+  /// so existing vector golden images match without ±1 LSB 8-bit quantization.
+  static bool shadowCaching = true;
+
   ShapeBorder get _shape {
     if (circle) return const CircleBorder();
     if (_isStadium) return const StadiumBorder();
@@ -182,12 +187,11 @@ class GlassSurface extends StatelessWidget {
     }
 
     if (s.shadows.isNotEmpty) {
-      if ((tier == GlassTier.sheet || tier == GlassTier.chrome) && !circle && !debugDisableShadows) {
+      if ((tier == GlassTier.sheet || tier == GlassTier.chrome) && !circle && shadowCaching) {
         // Cache only the static shadow on rectangular/pill chrome & sheet panels
-        // (small 44dp circular buttons and widget-test `debugDisableShadows`
-        // runs draw directly via CustomPaint). Impeller does not raster-cache a
-        // RepaintBoundary on all backends. Include the outer shadow in the
-        // snapshot's size so the image cannot cut it off.
+        // (small 44dp circular buttons draw directly via CustomPaint). Impeller
+        // does not raster-cache a RepaintBoundary on all backends. Include the
+        // outer shadow in the snapshot's size so the image cannot cut it off.
         final extent = _GlassShadowPainter.extentOf(s.shadows);
         content = _ShadowStack(
           extent: extent,
@@ -373,6 +377,12 @@ class _RenderShadowStack extends RenderBox {
   void visitChildren(RenderObjectVisitor visitor) {
     if (_shadow != null) visitor(_shadow!);
     if (_child != null) visitor(_child!);
+  }
+
+  @override
+  void redepthChildren() {
+    if (_shadow != null) redepthChild(_shadow!);
+    if (_child != null) redepthChild(_child!);
   }
 
   @override

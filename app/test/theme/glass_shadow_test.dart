@@ -50,6 +50,9 @@ Future<Uint8List> _pixels(WidgetTester tester) async {
 }
 
 void main() {
+  setUp(() => GlassSurface.shadowCaching = true);
+  tearDown(() => GlassSurface.shadowCaching = false);
+
   for (final tier in [GlassTier.sheet, GlassTier.chrome]) {
     testWidgets('$tier content and fill repaint without repainting its shadow', (tester) async {
       final oldDisableShadows = debugDisableShadows;
