@@ -186,10 +186,15 @@ class _AlertBannerLayerState extends ConsumerState<AlertBannerLayer> {
             reverseDuration: AppMotion.of(context, AppMotion.standard),
             switchInCurve: AppMotion.enter,
             switchOutCurve: AppMotion.exit,
-            transitionBuilder: (child, animation) => FadeTransition(
-              opacity: animation,
+            // Fading the whole glass card blends sharp page content back over
+            // its blurred backdrop. Keep the surface opaque to compositing and
+            // slide it in/out instead, including the space above the banner.
+            transitionBuilder: (child, animation) => AnimatedBuilder(
+              animation: animation,
+              builder: (context, child) =>
+                  Transform.translate(offset: Offset(0, -top * (1 - animation.value)), child: child),
               child: SlideTransition(
-                position: Tween(begin: const Offset(0, -0.6), end: Offset.zero).animate(animation),
+                position: Tween(begin: const Offset(0, -1), end: Offset.zero).animate(animation),
                 child: child,
               ),
             ),
