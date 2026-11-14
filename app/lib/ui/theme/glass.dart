@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 
 import '../common/pressable.dart';
 import '../common/ui_trace.dart';
@@ -8,6 +9,42 @@ import '../common/ui_trace.dart';
 import 'motion.dart';
 import 'shapes.dart';
 import 'surfaces.dart';
+
+/// Controls backdrop sampling locally without changing the theme. Unlike an
+/// InheritedTheme, this is not captured by sheets opened from inside the scope.
+/// Their glass still follows the user's transparency setting.
+class GlassBackdropScope extends InheritedWidget {
+  const GlassBackdropScope({
+    super.key,
+    required this.enabled,
+    this.translucentWhenDisabled = false,
+    required super.child,
+  });
+
+  final bool enabled;
+
+  /// True when the backdrop behind this scope is already a smooth solid-gradient
+  /// veil (no sharp text or custom picture), so skipping `BackdropFilter` can
+  /// keep the translucent `s.fill` instead of switching to opaque `fallbackFill`.
+  final bool translucentWhenDisabled;
+
+  static bool enabledOf(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<GlassBackdropScope>()?.enabled ?? true;
+
+  static bool translucentWhenDisabledOf(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<GlassBackdropScope>()?.translucentWhenDisabled ?? false;
+
+  /// True while the surface is uncovered and active (either sampling a live
+  /// backdrop or standing translucent over a smooth gradient veil).
+  static bool animationsEnabledOf(BuildContext context) {
+    final scope = context.dependOnInheritedWidgetOfExactType<GlassBackdropScope>();
+    return scope == null || scope.enabled || scope.translucentWhenDisabled;
+  }
+
+  @override
+  bool updateShouldNotify(GlassBackdropScope oldWidget) =>
+      enabled != oldWidget.enabled || translucentWhenDisabled != oldWidget.translucentWhenDisabled;
+}
 
 /// 玻璃表面:**模糊背后的内容 → 叠半透明填充 → 发丝描边 + 顶边高光 → 外投影**。
 ///
@@ -26,9 +63,9 @@ import 'surfaces.dart';
 /// - 只有 [GlassTier.chrome] / [GlassTier.sheet] 默认真模糊;同屏真模糊的
 ///   元素控制在 3 个以内(顶栏、输入条、弹层)。
 /// - 同屏多个**互不重叠**的模糊件(顶栏左圆钮 + 标题胶囊 + 右圆钮)放进同一个
-///   `BackdropGroup`,并传 [grouped] = true,引擎只采一次背景。
-/// - 模糊用 `ImageFilterConfig.blur(bounded: true)`:采样不越出形状边界,
-///   边缘不会被外面的颜色"渗"进来(iOS 同款)。
+///   `BackdropGroup`,并传 [grouped] = true,用非 bounded 的 `ui.ImageFilter.blur`
+///   让组内滤镜参数完全一致,引擎才能真正合并成单次背景采样与单次模糊(见 Flutter
+///   #191207 / PR #191613)。单独使用的玻璃用 `bounded: true` 防止邻界渗色。
 /// - 降级:主题里 `DshSurfaces.blurEnabled == false`(设置"减少透明效果"/
 ///   低端机)或系统高对比度时,不创建 `BackdropFilter`,改用近乎不透明的
 ///   `fallbackFill` —— 观感是"磨砂纸",可读性不降。
@@ -109,13 +146,15 @@ class GlassSurface extends StatelessWidget {
     final surfaces = DshSurfaces.of(context);
     final s = style ?? surfaces.glass(tier);
     final highContrast = MediaQuery.maybeHighContrastOf(context) ?? false;
+    final sampleBackdrop = GlassBackdropScope.enabledOf(context);
+    final keepTranslucent = GlassBackdropScope.translucentWhenDisabledOf(context);
     final reduce = !surfaces.blurEnabled || highContrast || uiTraceNoBlur;
     final useBlur = !reduce && (blur ?? s.blurs);
     if (uiTraceEnabled) {
       uiTrace('glass', 'build', {'tier': tier.name, 'blur': useBlur, 'grouped': grouped});
     }
     final fill = useBlur
-        ? Color.lerp(s.fallbackFill, s.fill, settled ?? 1)!
+        ? Color.lerp(s.fallbackFill, s.fill, (sampleBackdrop || keepTranslucent) ? (settled ?? 1) : 0)!
         : (reduce || s.blurs ? s.fallbackFill : s.fill);
     final shape = _shape;
     final textDirection = Directionality.maybeOf(context);
@@ -151,8 +190,13 @@ class GlassSurface extends StatelessWidget {
     );
 
     if (useBlur) {
-      final config = _filterFor(s.blurs ? s.blurSigma : 14, s.saturation);
-      final sampling = settled != 0;
+      // Grouped filters must resolve to identical parameters across siblings so
+      // Impeller's BackdropGroup collapses them into a single blur pass instead
+      // of running 3n separate offscreen passes per frame.
+      final config = _filterFor(s.blurs ? s.blurSigma : 14, s.saturation, bounded: !grouped);
+      // Keep the filter and content mounted while a moving ancestor suspends
+      // sampling. Inserting/removing it would reset unkeyed content State.
+      final sampling = sampleBackdrop && settled != 0;
       content = grouped
           ? BackdropFilter.grouped(filterConfig: config, enabled: sampling, child: content)
           : BackdropFilter(filterConfig: config, enabled: sampling, child: content);
@@ -160,10 +204,33 @@ class GlassSurface extends StatelessWidget {
     }
 
     if (s.shadows.isNotEmpty) {
-      content = CustomPaint(
-        painter: _GlassShadowPainter(shape: shape, shadows: s.shadows, textDirection: textDirection),
-        child: content,
-      );
+      if (tier == GlassTier.sheet || tier == GlassTier.chrome) {
+        // Cache only the static shadow, not the live glass/content. Impeller
+        // does not raster-cache a RepaintBoundary on all backends. Include the
+        // outer shadow in the snapshot's size so the image cannot cut it off.
+        final extent = _GlassShadowPainter.extentOf(s.shadows);
+        content = _ShadowStack(
+          extent: extent,
+          shadow: IgnorePointer(
+            child: RepaintBoundary(
+              child: _CachedGlassShadow(
+                painter: _GlassShadowPainter(
+                  shape: shape,
+                  shadows: s.shadows,
+                  textDirection: textDirection,
+                  inset: extent,
+                ),
+              ),
+            ),
+          ),
+          child: content,
+        );
+      } else {
+        content = CustomPaint(
+          painter: _GlassShadowPainter(shape: shape, shadows: s.shadows, textDirection: textDirection),
+          child: content,
+        );
+      }
     }
     return content;
   }
@@ -176,9 +243,9 @@ class GlassSurface extends StatelessWidget {
     return ClipRSuperellipse(borderRadius: _radius, child: child);
   }
 
-  static ImageFilterConfig _filterFor(double sigma, double saturation) {
-    final blur = ImageFilterConfig.blur(sigmaX: sigma, sigmaY: sigma, bounded: true);
-    if (saturation == 1) return blur;
+  static ImageFilterConfig _filterFor(double sigma, double saturation, {required bool bounded}) {
+    final blur = ImageFilterConfig.blur(sigmaX: sigma, sigmaY: sigma, bounded: bounded);
+    if (saturation == 1 || !bounded) return blur;
     return ImageFilterConfig.compose(outer: ImageFilterConfig(ColorFilter.matrix(_saturate(saturation))), inner: blur);
   }
 
@@ -194,6 +261,229 @@ class GlassSurface extends StatelessWidget {
       0, 0, 0, 1, 0, //
     ];
   }
+}
+
+class _ShadowStack extends RenderObjectWidget {
+  const _ShadowStack({required this.extent, required this.shadow, required this.child});
+
+  final double extent;
+  final Widget shadow;
+  final Widget child;
+
+  @override
+  RenderObjectElement createElement() => _ShadowStackElement(this);
+
+  @override
+  RenderObject createRenderObject(BuildContext context) => _RenderShadowStack(extent);
+
+  @override
+  void updateRenderObject(BuildContext context, _RenderShadowStack renderObject) => renderObject.extent = extent;
+}
+
+class _ShadowStackElement extends RenderObjectElement {
+  _ShadowStackElement(_ShadowStack super.widget);
+
+  Element? _shadow;
+  Element? _child;
+
+  @override
+  _ShadowStack get widget => super.widget as _ShadowStack;
+
+  @override
+  _RenderShadowStack get renderObject => super.renderObject as _RenderShadowStack;
+
+  @override
+  void visitChildren(ElementVisitor visitor) {
+    if (_shadow != null) visitor(_shadow!);
+    if (_child != null) visitor(_child!);
+  }
+
+  @override
+  void forgetChild(Element child) {
+    if (child == _shadow) _shadow = null;
+    if (child == _child) _child = null;
+    super.forgetChild(child);
+  }
+
+  @override
+  void mount(Element? parent, Object? newSlot) {
+    super.mount(parent, newSlot);
+    _shadow = updateChild(_shadow, widget.shadow, 0);
+    _child = updateChild(_child, widget.child, 1);
+  }
+
+  @override
+  void update(_ShadowStack newWidget) {
+    super.update(newWidget);
+    _shadow = updateChild(_shadow, widget.shadow, 0);
+    _child = updateChild(_child, widget.child, 1);
+  }
+
+  @override
+  void insertRenderObjectChild(RenderBox child, int slot) {
+    if (slot == 0) {
+      renderObject.shadow = child;
+    } else {
+      renderObject.child = child;
+    }
+  }
+
+  @override
+  void moveRenderObjectChild(RenderBox child, int oldSlot, int newSlot) {}
+
+  @override
+  void removeRenderObjectChild(RenderBox child, int slot) {
+    if (slot == 0) {
+      if (renderObject.shadow == child) renderObject.shadow = null;
+    } else {
+      if (renderObject.child == child) renderObject.child = null;
+    }
+  }
+}
+
+class _RenderShadowStack extends RenderBox {
+  _RenderShadowStack(this._extent);
+
+  double _extent;
+  set extent(double value) {
+    if (_extent == value) return;
+    _extent = value;
+    markNeedsLayout();
+  }
+
+  RenderBox? _shadow;
+  RenderBox? get shadow => _shadow;
+  set shadow(RenderBox? value) {
+    if (_shadow == value) return;
+    if (_shadow != null) dropChild(_shadow!);
+    _shadow = value;
+    if (_shadow != null) {
+      _shadow!.parentData = BoxParentData();
+      adoptChild(_shadow!);
+    }
+  }
+
+  RenderBox? _child;
+  RenderBox? get child => _child;
+  set child(RenderBox? value) {
+    if (_child == value) return;
+    if (_child != null) dropChild(_child!);
+    _child = value;
+    if (_child != null) {
+      _child!.parentData = BoxParentData();
+      adoptChild(_child!);
+    }
+  }
+
+  @override
+  void attach(PipelineOwner owner) {
+    super.attach(owner);
+    _shadow?.attach(owner);
+    _child?.attach(owner);
+  }
+
+  @override
+  void detach() {
+    super.detach();
+    _shadow?.detach();
+    _child?.detach();
+  }
+
+  @override
+  void visitChildren(RenderObjectVisitor visitor) {
+    if (_shadow != null) visitor(_shadow!);
+    if (_child != null) visitor(_child!);
+  }
+
+  @override
+  double computeMinIntrinsicWidth(double height) => _child?.getMinIntrinsicWidth(height) ?? 0;
+
+  @override
+  double computeMaxIntrinsicWidth(double height) => _child?.getMaxIntrinsicWidth(height) ?? 0;
+
+  @override
+  double computeMinIntrinsicHeight(double width) => _child?.getMinIntrinsicHeight(width) ?? 0;
+
+  @override
+  double computeMaxIntrinsicHeight(double width) => _child?.getMaxIntrinsicHeight(width) ?? 0;
+
+  @override
+  double? computeDistanceToActualBaseline(TextBaseline baseline) => _child?.getDistanceToActualBaseline(baseline);
+
+  @override
+  Size computeDryLayout(BoxConstraints constraints) => _child?.getDryLayout(constraints) ?? constraints.smallest;
+
+  @override
+  void performLayout() {
+    final c = _child;
+    if (c == null) {
+      size = constraints.smallest;
+      return;
+    }
+    c.layout(constraints, parentUsesSize: true);
+    size = c.size;
+    (c.parentData! as BoxParentData).offset = Offset.zero;
+    final s = _shadow;
+    if (s != null) {
+      s.layout(BoxConstraints.tight(Size(size.width + 2 * _extent, size.height + 2 * _extent)));
+      (s.parentData! as BoxParentData).offset = Offset(-_extent, -_extent);
+    }
+  }
+
+  @override
+  bool hitTestChildren(BoxHitTestResult result, {required Offset position}) =>
+      _child?.hitTest(result, position: position) ?? false;
+
+  @override
+  void paint(PaintingContext context, Offset offset) {
+    final s = _shadow;
+    if (s != null) context.paintChild(s, offset + (s.parentData! as BoxParentData).offset);
+    final c = _child;
+    if (c != null) context.paintChild(c, offset);
+  }
+}
+
+class _CachedGlassShadow extends StatefulWidget {
+  const _CachedGlassShadow({required this.painter});
+
+  final _GlassShadowPainter painter;
+
+  @override
+  State<_CachedGlassShadow> createState() => _CachedGlassShadowState();
+}
+
+class _CachedGlassShadowState extends State<_CachedGlassShadow> {
+  final _controller = SnapshotController(allowSnapshotting: true);
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final active = TickerMode.valuesOf(context).enabled;
+    if (_controller.allowSnapshotting != active) {
+      _controller.allowSnapshotting = active;
+      if (!active) _controller.clear();
+    }
+  }
+
+  @override
+  void didUpdateWidget(_CachedGlassShadow oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.painter.shouldRepaint(oldWidget.painter)) _controller.clear();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => SnapshotWidget(
+    controller: _controller,
+    // SnapshotWidget also invalidates its image when MediaQuery's DPR changes.
+    autoresize: true,
+    child: CustomPaint(painter: widget.painter),
+  );
 }
 
 /// 发丝描边 + 顶边高光。描边画在形状内侧,裁剪时不会被切掉一半。
@@ -252,23 +542,28 @@ class _GlassEdgePainter extends CustomPainter {
 
 /// 只在形状外部画的投影。
 class _GlassShadowPainter extends CustomPainter {
-  _GlassShadowPainter({required this.shape, required this.shadows, required this.textDirection});
+  _GlassShadowPainter({required this.shape, required this.shadows, required this.textDirection, this.inset = 0});
 
   final ShapeBorder shape;
   final List<BoxShadow> shadows;
   final TextDirection? textDirection;
+  final double inset;
 
-  @override
-  void paint(Canvas canvas, Size size) {
-    if (size.isEmpty) return;
-    final rect = Offset.zero & size;
+  static double extentOf(List<BoxShadow> shadows) {
     var extent = 0.0;
     for (final s in shadows) {
       extent = math.max(extent, s.blurRadius * 2 + s.spreadRadius.abs() + s.offset.distance);
     }
+    return extent + 2;
+  }
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rect = (Offset.zero & size).deflate(inset);
+    if (rect.isEmpty) return;
     final outside = Path()
       ..fillType = PathFillType.evenOdd
-      ..addRect(rect.inflate(extent + 2))
+      ..addRect(rect.inflate(extentOf(shadows)))
       ..addPath(shape.getOuterPath(rect, textDirection: textDirection), Offset.zero);
     canvas.save();
     canvas.clipPath(outside);
@@ -283,7 +578,10 @@ class _GlassShadowPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_GlassShadowPainter old) =>
-      old.shape != shape || !_sameShadows(old.shadows, shadows) || old.textDirection != textDirection;
+      old.shape != shape ||
+      old.inset != inset ||
+      !_sameShadows(old.shadows, shadows) ||
+      old.textDirection != textDirection;
 
   static bool _sameShadows(List<BoxShadow> a, List<BoxShadow> b) {
     if (identical(a, b)) return true;
@@ -360,7 +658,7 @@ class _SlidingGlassState extends State<SlidingGlass> with SingleTickerProviderSt
     animation: _settled,
     builder: (context, child) =>
         GlassSurface(tier: widget.tier, borderRadius: widget.borderRadius, settled: _settled.value, child: child),
-    child: widget.child,
+    child: widget.child == null ? null : RepaintBoundary(child: widget.child),
   );
 }
 
