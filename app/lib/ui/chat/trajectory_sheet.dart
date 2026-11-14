@@ -7,6 +7,7 @@ import 'dart:math' as math;
 
 import 'package:dsh_client/dsh_client.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show ScrollDirection;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../l10n/l10n.dart';
@@ -145,6 +146,7 @@ class _FollowTail extends StatefulWidget {
 
 class _FollowTailState extends State<_FollowTail> {
   bool _pinned = true;
+  bool _sticking = false;
 
   @override
   void initState() {
@@ -173,17 +175,38 @@ class _FollowTailState extends State<_FollowTail> {
     final c = widget.controller;
     if (!c.hasClients || c.positions.length != 1) return;
     final p = c.position;
-    _pinned = p.maxScrollExtent - p.pixels < 24;
+    if (p.userScrollDirection == ScrollDirection.forward) {
+      _pinned = false;
+    } else if (!_sticking) {
+      _pinned = p.maxScrollExtent - p.pixels < 24;
+    }
   }
 
   void _stick() {
-    if (!widget.follow || !_pinned) return;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    if (!widget.follow || !_pinned || _sticking) return;
+    _sticking = true;
+    var attempts = 0;
+    void step(Duration _) {
       final c = widget.controller;
-      if (!mounted || !c.hasClients || c.positions.length != 1) return;
+      if (!mounted || !widget.follow || !_pinned || !c.hasClients || c.positions.length != 1) {
+        _sticking = false;
+        return;
+      }
       final p = c.position;
+      if (p.userScrollDirection != ScrollDirection.idle) {
+        _sticking = false;
+        return;
+      }
       if (p.pixels != p.maxScrollExtent) p.jumpTo(p.maxScrollExtent);
-    });
+      attempts++;
+      if (attempts < 4 && p.maxScrollExtent - p.pixels > 0.5) {
+        WidgetsBinding.instance.addPostFrameCallback(step);
+      } else {
+        _sticking = false;
+      }
+    }
+
+    WidgetsBinding.instance.addPostFrameCallback(step);
   }
 
   @override

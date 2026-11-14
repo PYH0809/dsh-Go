@@ -171,9 +171,9 @@ class _ChatListState extends ConsumerState<ChatList> with SingleTickerProviderSt
 
   /// EditableText's reveal request includes its caret padding. The centered
   /// viewport's getOffsetToReveal omits the anchor, so use the actual rectangle
-  /// in this viewport instead. Read-only SelectableText taps in tool wells or
-  /// notices must never jump the message list at all; other reveal requests
-  /// keep Flutter's behavior.
+  /// in this viewport instead. Read-only SelectableText collapsed taps in tool
+  /// wells or notices must never jump the message list, while non-collapsed
+  /// selection-handle drags still reveal through the anchor-aware calculation.
   bool _revealInlineEditor(RenderObject target, Rect? rect, Duration duration, Curve curve) {
     final focus = FocusManager.instance.primaryFocus?.context;
     if (focus == null || !focus.mounted || focus.findAncestorStateOfType<_ChatListState>() != this) return false;
@@ -184,10 +184,11 @@ class _ChatListState extends ConsumerState<ChatList> with SingleTickerProviderSt
       ancestor = ancestor.parent;
     }
     if (ancestor == null) return false;
-    // Tapping a read-only SelectableText (e.g. file path or command output inside
-    // an expanded ToolDetail) places a hidden caret and calls showOnScreen().
-    // Letting that reach the centered CustomScrollView jumps the whole chat list!
-    if (editor.widget.readOnly || !_scroll.hasClients) return true;
+    if (!_scroll.hasClients) return true;
+    // Tapping a read-only SelectableText places a collapsed hidden caret and
+    // calls showOnScreen(). Swallow collapsed taps so the list stays still,
+    // while allowing non-collapsed selection-handle drags to reveal cleanly!
+    if (editor.widget.readOnly && editor.textEditingValue.selection.isCollapsed) return true;
     final viewport = _centerKey.currentContext?.findRenderObject()?.parent;
     if (viewport is! RenderViewport || !viewport.hasSize) return false;
     final position = _scroll.position;

@@ -228,9 +228,14 @@ class _SheetGlassState extends State<_SheetGlass> with SingleTickerProviderState
     _lastExtent = extent;
     if ((previous - extent).abs() > 1e-4) {
       _extentMoving = true;
-      _sync();
+      final phase = SchedulerBinding.instance.schedulerPhase;
+      final safeSync =
+          phase != SchedulerPhase.persistentCallbacks && phase != SchedulerPhase.midFrameMicrotasks;
+      if (safeSync) _sync();
       final ticket = ++_extentTicket;
       SchedulerBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        if (!safeSync && _extentMoving) _sync();
         // Wait one subsequent frame without a new notification so idle frames
         // clear `_extentMoving` while active 60/120Hz drags keep it true!
         SchedulerBinding.instance.addPostFrameCallback((_) {
