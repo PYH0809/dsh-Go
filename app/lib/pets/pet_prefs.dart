@@ -55,6 +55,7 @@ class PetPrefs {
     this.size = PetSize.medium,
     this.quiet = false,
     this.whaleTail = true,
+    this.whaleTailExplicit = false,
     this.position = defaultPosition,
     this.hiddenUntil,
     this.overlayRenderer = PetOverlayRenderer.pixel,
@@ -76,8 +77,10 @@ class PetPrefs {
   final bool quiet;
 
   /// Shows the swimming whale tail on the run strip while no pet stands on it.
-  /// Turning this off alongside [noPetId] stops both mascots for lower power.
+  /// Defaults to `true` (following the performance profile until explicitly toggled);
+  /// turning this off alongside [noPetId] stops both mascots for lower power.
   final bool whaleTail;
+  final bool whaleTailExplicit;
 
   /// Where its foot stands along its perch, as a share of the perch's width.
   final double position;
@@ -99,6 +102,7 @@ class PetPrefs {
     PetSize? size,
     bool? quiet,
     bool? whaleTail,
+    bool? whaleTailExplicit,
     double? position,
     DateTime? hiddenUntil,
     bool clearHidden = false,
@@ -112,6 +116,7 @@ class PetPrefs {
     size: size ?? this.size,
     quiet: quiet ?? this.quiet,
     whaleTail: whaleTail ?? this.whaleTail,
+    whaleTailExplicit: whaleTailExplicit ?? this.whaleTailExplicit,
     position: position ?? this.position,
     hiddenUntil: clearHidden ? null : (hiddenUntil ?? this.hiddenUntil),
     overlayRenderer: overlayRenderer ?? this.overlayRenderer,
@@ -128,6 +133,7 @@ class PetPrefs {
       other.size == size &&
       other.quiet == quiet &&
       other.whaleTail == whaleTail &&
+      other.whaleTailExplicit == whaleTailExplicit &&
       other.position == position &&
       other.hiddenUntil == hiddenUntil &&
       other.overlayRenderer == overlayRenderer &&
@@ -136,8 +142,8 @@ class PetPrefs {
       other.loaded == loaded;
 
   @override
-  int get hashCode => Object.hash(packId, packExplicit, size, quiet, whaleTail, position, hiddenUntil,
-      overlayRenderer, floatZoom, floatY, loaded);
+  int get hashCode => Object.hash(packId, packExplicit, size, quiet, whaleTail, whaleTailExplicit, position,
+      hiddenUntil, overlayRenderer, floatZoom, floatY, loaded);
 }
 
 class PetPrefsController extends Notifier<PetPrefs> {
@@ -152,12 +158,13 @@ class PetPrefsController extends Notifier<PetPrefs> {
     framing: 'pet.overlay_framing',
   );
 
-  late Future<void> _loaded;
+  Future<void> _loaded = Future<void>.value();
 
   @override
   PetPrefs build() {
     ref.listen(performanceDefaultsProvider.select((p) => p.petEnabled), (_, next) {
       if (!state.packExplicit) state = state.copyWith(packId: next ? defaultPetId : noPetId);
+      if (!state.whaleTailExplicit) state = state.copyWith(whaleTail: next);
     });
     _loaded = _load();
     return const PetPrefs(packExplicit: false);
@@ -185,16 +192,19 @@ class PetPrefsController extends Notifier<PetPrefs> {
       } on FormatException {
         // A corrupt framing preference cannot change the renderer default.
       }
+      final storedWhaleTail = prefs.getBool(keys.whaleTail);
+      final defaultMascot = ref.read(performanceDefaultsProvider).petEnabled;
       state = PetPrefs(
         packId: explicit
             ? pack!
-            : ref.read(performanceDefaultsProvider).petEnabled
+            : defaultMascot
             ? defaultPetId
             : noPetId,
         packExplicit: explicit,
         size: PetSize.fromName(prefs.getString(keys.size)),
         quiet: prefs.getBool(keys.quiet) ?? false,
-        whaleTail: prefs.getBool(keys.whaleTail) ?? true,
+        whaleTail: storedWhaleTail ?? defaultMascot,
+        whaleTailExplicit: storedWhaleTail != null,
         position: (prefs.getDouble(keys.position) ?? PetPrefs.defaultPosition).clamp(0.0, 1.0),
         hiddenUntil: hidden == null ? null : DateTime.fromMillisecondsSinceEpoch(hidden),
         overlayRenderer: PetOverlayRenderer.fromName(prefs.getString(keys.renderer)),
@@ -243,24 +253,8 @@ class PetPrefsController extends Notifier<PetPrefs> {
 
   Future<void> setSize(PetSize v) => _save((s) => s.copyWith(size: v), (p) => p.setString(keys.size, v.name));
   Future<void> setQuiet(bool v) => _save((s) => s.copyWith(quiet: v), (p) => p.setBool(keys.quiet, v));
-  Future<void> setWhaleTail(bool v) => _save((s) => s.copyWith(whaleTail: v), (p) => p.setBool(keys.whaleTail, v));
-
-  /// Disables both the chat pet ([noPetId]) and the run strip's whale tail, or
-  /// restores the default pet and whale tail together.
-  Future<void> setMascotsEnabled(bool enabled) => _save(
-    (s) => s.copyWith(
-      packId: enabled ? (s.enabled ? s.packId : defaultPetId) : noPetId,
-      packExplicit: true,
-      whaleTail: enabled,
-      clearHidden: enabled,
-    ),
-    (p) async {
-      final nextPack = enabled ? (state.enabled ? state.packId : defaultPetId) : noPetId;
-      await p.setString(keys.pack, nextPack);
-      await p.setBool(keys.whaleTail, enabled);
-      if (enabled) await p.remove(keys.hidden);
-    },
-  );
+  Future<void> setWhaleTail(bool v) =>
+      _save((s) => s.copyWith(whaleTail: v, whaleTailExplicit: true), (p) => p.setBool(keys.whaleTail, v));
   Future<void> setOverlayRenderer(PetOverlayRenderer value) =>
       _save((s) => s.copyWith(overlayRenderer: value), (p) => p.setString(keys.renderer, value.name));
 

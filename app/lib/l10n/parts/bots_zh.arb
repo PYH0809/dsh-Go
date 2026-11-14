@@ -832,8 +832,6 @@
   "botsPetQuietSubtitle": "只做动作，不冒气泡",
   "botsPetWhaleTail": "进度条鲸尾",
   "botsPetWhaleTailSubtitle": "生成中在胶囊条左端游动；关闭可连同不显示宠物一起降低直播耗电",
-  "botsPetMascots": "桌宠与鲸尾",
-  "botsPetMascotsSubtitle": "关闭后同时隐藏对话页宠物与进度胶囊条左端的游动鲸尾",
   "botsPetShowNow": "立即显示",
   "botsPetHiddenUntil": "藏到 {time}",
   "@botsPetHiddenUntil": {

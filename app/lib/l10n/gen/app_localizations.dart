@@ -5546,18 +5546,6 @@ abstract class L10n {
   /// **'生成中在胶囊条左端游动；关闭可连同不显示宠物一起降低直播耗电'**
   String get botsPetWhaleTailSubtitle;
 
-  /// No description provided for @botsPetMascots.
-  ///
-  /// In zh, this message translates to:
-  /// **'桌宠与鲸尾'**
-  String get botsPetMascots;
-
-  /// No description provided for @botsPetMascotsSubtitle.
-  ///
-  /// In zh, this message translates to:
-  /// **'关闭后同时隐藏对话页宠物与进度胶囊条左端的游动鲸尾'**
-  String get botsPetMascotsSubtitle;
-
   /// No description provided for @botsPetShowNow.
   ///
   /// In zh, this message translates to:
@@ -29549,14 +29537,8 @@ abstract class L10n {
   /// No description provided for @searchKwPetWhaleTail.
   ///
   /// In zh, this message translates to:
-  /// **'鲸尾,金鱼尾巴,鱼尾,状态条尾巴,胶囊尾巴,省电'**
+  /// **'鲸尾,金鱼尾巴,鱼尾,隐藏鲸尾,状态条尾巴,胶囊尾巴,省电,功耗'**
   String get searchKwPetWhaleTail;
-
-  /// No description provided for @searchKwPetMascots.
-  ///
-  /// In zh, this message translates to:
-  /// **'宠物,桌宠,鲸尾,金鱼尾巴,鱼尾,关闭宠物,隐藏尾巴,省电,功耗'**
-  String get searchKwPetMascots;
 
   /// No description provided for @searchKwPetOutside.
   ///

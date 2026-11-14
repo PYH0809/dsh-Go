@@ -906,12 +906,6 @@ abstract final class Spots {
     keywords: (l) => l.searchKwFluidMotion,
     condition: SpotCondition.animationsOn,
   );
-  static final petMascots = SettingSpot(
-    'pet-mascots',
-    page: SettingsPageId.performance,
-    title: (l) => l.botsPetMascots,
-    keywords: (l) => l.searchKwPetMascots,
-  );
 
   // 通知.
   static final notifyEnabled = SettingSpot(
@@ -1148,7 +1142,6 @@ final _rows = <SettingSpot>[
   Spots.blur,
   Spots.animations,
   Spots.fluidMotion,
-  Spots.petMascots,
   Spots.notifyEnabled,
   Spots.notifyDone,
   Spots.notifyFailed,

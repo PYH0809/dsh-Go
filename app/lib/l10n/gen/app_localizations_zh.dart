@@ -2999,12 +2999,6 @@ class L10nZh extends L10n {
   String get botsPetWhaleTailSubtitle => '生成中在胶囊条左端游动；关闭可连同不显示宠物一起降低直播耗电';
 
   @override
-  String get botsPetMascots => '桌宠与鲸尾';
-
-  @override
-  String get botsPetMascotsSubtitle => '关闭后同时隐藏对话页宠物与进度胶囊条左端的游动鲸尾';
-
-  @override
   String get botsPetShowNow => '立即显示';
 
   @override
@@ -16151,10 +16145,7 @@ class L10nZh extends L10n {
   String get searchKwPetQuiet => '安静,宠物安静';
 
   @override
-  String get searchKwPetWhaleTail => '鲸尾,金鱼尾巴,鱼尾,状态条尾巴,胶囊尾巴,省电';
-
-  @override
-  String get searchKwPetMascots => '宠物,桌宠,鲸尾,金鱼尾巴,鱼尾,关闭宠物,隐藏尾巴,省电,功耗';
+  String get searchKwPetWhaleTail => '鲸尾,金鱼尾巴,鱼尾,隐藏鲸尾,状态条尾巴,胶囊尾巴,省电,功耗';
 
   @override
   String get searchKwPetOutside => '悬浮窗,桌面宠物,宠物悬浮';

@@ -3175,13 +3175,6 @@ class L10nEn extends L10n {
       'Swims on the left of the status pill while generating; turn off with no pet to save power';
 
   @override
-  String get botsPetMascots => 'Pet & whale tail';
-
-  @override
-  String get botsPetMascotsSubtitle =>
-      'Turn off to hide both the chat pet and the swimming whale tail on the status pill';
-
-  @override
   String get botsPetShowNow => 'Show now';
 
   @override
@@ -16996,10 +16989,7 @@ class L10nEn extends L10n {
   String get searchKwPetQuiet => 'quiet,pet quiet';
 
   @override
-  String get searchKwPetWhaleTail => 'whale tail,fish tail,status bar tail,battery,power';
-
-  @override
-  String get searchKwPetMascots => 'pet,whale tail,fish tail,hide pet,hide tail,battery,power';
+  String get searchKwPetWhaleTail => 'whale tail,fish tail,hide whale tail,status bar tail,battery,power';
 
   @override
   String get searchKwPetOutside => 'overlay,floating pet,outside app';
