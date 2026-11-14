@@ -134,12 +134,6 @@ class SessionsDrawer extends ConsumerWidget {
       final known = {for (final s in ref.read(sessionsProvider.notifier).allSessions) s.sessionId};
       if (known.isNotEmpty) unawaited(ref.read(drawerViewProvider.notifier).forgetMissing(known));
     });
-    // Hidden (closed by a tap, a swipe or back): multi-select ends with it.
-    if (selecting && !TickerMode.valuesOf(context).enabled) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (context.mounted) ref.read(drawerSelectionProvider.notifier).end();
-      });
-    }
     final quick = AppMotion.of(context, AppMotion.quick);
     // A phone on its side: the top of the drawer (brand, search, filters)
     // would leave room for two conversations, so it scrolls away with them.
@@ -236,6 +230,8 @@ class SessionsDrawer extends ConsumerWidget {
               ...top,
               Expanded(child: list),
             ],
+            // Hidden (closed by a tap, a swipe or back): multi-select ends with it.
+            _ClearSelectionWhenHidden(selecting: selecting),
             // The action bar lies exactly over the identity bar, which
             // keeps its size while hidden: same height at any text size.
             RepaintBoundary(
@@ -1125,5 +1121,21 @@ class _RoundButton extends StatelessWidget {
         child: button,
       ),
     );
+  }
+}
+
+class _ClearSelectionWhenHidden extends ConsumerWidget {
+  const _ClearSelectionWhenHidden({required this.selecting});
+
+  final bool selecting;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    if (selecting && !TickerMode.valuesOf(context).enabled) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (context.mounted) ref.read(drawerSelectionProvider.notifier).end();
+      });
+    }
+    return const SizedBox.shrink();
   }
 }

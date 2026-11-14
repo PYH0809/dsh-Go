@@ -640,17 +640,12 @@ class _DrawerOverlayState extends State<_DrawerOverlay> {
                     top: 0,
                     bottom: 0,
                     width: widget.width,
-                    child: Offstage(
-                      offstage: progress == 0,
-                      child: TickerMode(
-                        enabled: progress > 0 && routeActive,
-                        child: ExcludeFocus(
-                          excluding: progress == 0,
-                          child: Transform.translate(
-                            offset: Offset((progress - 1) * (widget.width + 24) * (widget.fromRight ? -1 : 1), 0),
-                            child: drawer!,
-                          ),
-                        ),
+                    child: Visibility(
+                      visible: progress > 0,
+                      maintainState: true,
+                      child: Transform.translate(
+                        offset: Offset((progress - 1) * (widget.width + 24) * (widget.fromRight ? -1 : 1), 0),
+                        child: drawer!,
                       ),
                     ),
                   ),
