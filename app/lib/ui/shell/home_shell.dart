@@ -532,6 +532,7 @@ class _SideParallax extends StatelessWidget {
         final parentSampling = GlassBackdropScope.enabledOf(context);
         final parentTranslucent = GlassBackdropScope.translucentWhenDisabledOf(context);
         final parentAnimations = GlassBackdropScope.animationsEnabledOf(context);
+        final uncovered = !AppBackdrop.snapshotCaching || routeCurrent;
         return AnimatedBuilder(
           animation: Listenable.merge([drawer, quickPanel]),
           // Moving the scrim or this transform must not repaint unchanged chat
@@ -540,14 +541,14 @@ class _SideParallax extends StatelessWidget {
           builder: (context, child) {
             final panelCovered = drawer.value > 0 || quickPanel.value > 0;
             final suspendCovered = AppBackdrop.snapshotCaching && panelCovered;
-            final active = parentSampling && routeCurrent && !suspendCovered;
+            final active = parentSampling && uncovered && !suspendCovered;
             // The overlay already suspends its own blur while moving. The
             // underlying chat's floating chrome must also stop sampling while
             // a side panel is open/moving or a modal route covers the shell.
             return GlassBackdropScope(
               enabled: active,
               translucentWhenDisabled: parentTranslucent,
-              animationsEnabled: parentAnimations && routeCurrent && !suspendCovered,
+              animationsEnabled: parentAnimations && uncovered && !suspendCovered,
               child: Transform.translate(
                 offset: Offset(fluid ? _share * (drawer.value * drawerWidth - quickPanel.value * quickPanelWidth) : 0, 0),
                 child: child,
@@ -595,13 +596,14 @@ class _DrawerOverlayState extends State<_DrawerOverlay> {
       builder: (context) {
         final routeCurrent = ModalRoute.of<Object?>(context)?.isCurrent ?? true;
         final routeActive = TickerMode.valuesOf(context).enabled;
+        final uncovered = !AppBackdrop.snapshotCaching || routeCurrent;
         final parentSampling = GlassBackdropScope.enabledOf(context);
         final parentTranslucent = GlassBackdropScope.translucentWhenDisabledOf(context);
         final parentAnimations = GlassBackdropScope.animationsEnabledOf(context);
         return GlassBackdropScope(
-          enabled: parentSampling && routeCurrent,
+          enabled: parentSampling && uncovered,
           translucentWhenDisabled: parentTranslucent,
-          animationsEnabled: parentAnimations && routeCurrent,
+          animationsEnabled: parentAnimations && uncovered,
           child: AnimatedBuilder(
             animation: widget.animation,
             child: SnapshotWidget(
@@ -613,7 +615,7 @@ class _DrawerOverlayState extends State<_DrawerOverlay> {
               // Snapshot the drawer only while a modal sheet covers the open
               // drawer (`!routeCurrent`), avoiding a single-frame texture
               // capture spike on the first moving slide frame.
-              final snap = routeActive && progress > 0 && !routeCurrent;
+              final snap = AppBackdrop.snapshotCaching && routeActive && progress > 0 && !routeCurrent;
               if (_snapshot.allowSnapshotting != snap) {
                 _snapshot.allowSnapshotting = snap;
                 if (!snap) _snapshot.clear();
@@ -638,12 +640,17 @@ class _DrawerOverlayState extends State<_DrawerOverlay> {
                     top: 0,
                     bottom: 0,
                     width: widget.width,
-                    child: Visibility(
-                      visible: progress > 0,
-                      maintainState: true,
-                      child: Transform.translate(
-                        offset: Offset((progress - 1) * (widget.width + 24) * (widget.fromRight ? -1 : 1), 0),
-                        child: drawer!,
+                    child: Offstage(
+                      offstage: progress == 0,
+                      child: TickerMode(
+                        enabled: progress > 0 && routeActive,
+                        child: ExcludeFocus(
+                          excluding: progress == 0,
+                          child: Transform.translate(
+                            offset: Offset((progress - 1) * (widget.width + 24) * (widget.fromRight ? -1 : 1), 0),
+                            child: drawer!,
+                          ),
+                        ),
                       ),
                     ),
                   ),
