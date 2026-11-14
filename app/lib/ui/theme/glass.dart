@@ -245,7 +245,7 @@ class GlassSurface extends StatelessWidget {
 
   static ImageFilterConfig _filterFor(double sigma, double saturation, {required bool bounded}) {
     final blur = ImageFilterConfig.blur(sigmaX: sigma, sigmaY: sigma, bounded: bounded);
-    if (saturation == 1 || !bounded) return blur;
+    if (saturation == 1) return blur;
     return ImageFilterConfig.compose(outer: ImageFilterConfig(ColorFilter.matrix(_saturate(saturation))), inner: blur);
   }
 
