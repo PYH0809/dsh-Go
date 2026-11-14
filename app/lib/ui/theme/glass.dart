@@ -18,6 +18,7 @@ class GlassBackdropScope extends InheritedWidget {
     super.key,
     required this.enabled,
     this.translucentWhenDisabled = false,
+    this.animationsEnabled,
     required super.child,
   });
 
@@ -28,22 +29,29 @@ class GlassBackdropScope extends InheritedWidget {
   /// keep the translucent `s.fill` instead of switching to opaque `fallbackFill`.
   final bool translucentWhenDisabled;
 
+  /// Whether leaf visual tickers (`WhaleTail`, `StatusDot`, `ThinkGlyph`,
+  /// `PetSprite`, `LiveElapsed`) should run inside this scope. Defaults to
+  /// `enabled || translucentWhenDisabled`.
+  final bool? animationsEnabled;
+
   static bool enabledOf(BuildContext context) =>
       context.dependOnInheritedWidgetOfExactType<GlassBackdropScope>()?.enabled ?? true;
 
   static bool translucentWhenDisabledOf(BuildContext context) =>
       context.dependOnInheritedWidgetOfExactType<GlassBackdropScope>()?.translucentWhenDisabled ?? false;
 
-  /// True while the surface is uncovered and active (either sampling a live
-  /// backdrop or standing translucent over a smooth gradient veil).
+  /// True while the surface is uncovered and active.
   static bool animationsEnabledOf(BuildContext context) {
     final scope = context.dependOnInheritedWidgetOfExactType<GlassBackdropScope>();
-    return scope == null || scope.enabled || scope.translucentWhenDisabled;
+    if (scope == null) return true;
+    return scope.animationsEnabled ?? (scope.enabled || scope.translucentWhenDisabled);
   }
 
   @override
   bool updateShouldNotify(GlassBackdropScope oldWidget) =>
-      enabled != oldWidget.enabled || translucentWhenDisabled != oldWidget.translucentWhenDisabled;
+      enabled != oldWidget.enabled ||
+      translucentWhenDisabled != oldWidget.translucentWhenDisabled ||
+      animationsEnabled != oldWidget.animationsEnabled;
 }
 
 /// 玻璃表面:**模糊背后的内容 → 叠半透明填充 → 发丝描边 + 顶边高光 → 外投影**。
