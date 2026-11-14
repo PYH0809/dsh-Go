@@ -9,7 +9,7 @@ import 'package:flutter/scheduler.dart';
 
 import '../../l10n/l10n.dart';
 import '../shell/adaptive/adaptive_layout.dart' show WindowClass;
-import '../theme/backdrop.dart' show AppBackdrop, BackdropVeilSampling;
+import '../theme/backdrop.dart' show AppBackdrop;
 import '../theme/glass.dart';
 import '../theme/motion.dart';
 import '../theme/semantic_colors.dart';
@@ -281,13 +281,8 @@ class _SheetGlassState extends State<_SheetGlass> with SingleTickerProviderState
 
   @override
   Widget build(BuildContext context) {
-    // Over the default smooth gradient backdrop (no custom wallpaper picture),
-    // translucent sheet fill already blends cleanly over the darkened modal
-    // barrier without a costly full-screen sigma=24 BackdropFilter pass on
-    // every content scroll frame! Custom wallpapers keep live backdrop blur.
-    final skipPlainBlur = AppBackdrop.snapshotCaching && !BackdropVeilSampling.hasPictureOf(context);
     final child = AppBackdrop.snapshotCaching ? RepaintBoundary(child: widget.child) : widget.child;
-    final glass = NotificationListener<DraggableScrollableNotification>(
+    return NotificationListener<DraggableScrollableNotification>(
       onNotification: _onExtent,
       child: AnimatedBuilder(
         animation: _settled,
@@ -302,13 +297,6 @@ class _SheetGlassState extends State<_SheetGlass> with SingleTickerProviderState
         },
         child: child,
       ),
-    );
-    if (!skipPlainBlur) return glass;
-    return GlassBackdropScope(
-      enabled: false,
-      translucentWhenDisabled: true,
-      animationsEnabled: GlassBackdropScope.animationsEnabledOf(context),
-      child: glass,
     );
   }
 }

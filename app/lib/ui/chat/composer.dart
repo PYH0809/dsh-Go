@@ -653,7 +653,6 @@ class _ComposerGlass extends StatelessWidget {
       return GlassSurface(tier: GlassTier.chrome, borderRadius: AppShape.radiusXl, grouped: true, child: child);
     }
     final parentSampling = GlassBackdropScope.enabledOf(context);
-    final parentTranslucent = GlassBackdropScope.translucentWhenDisabledOf(context);
     final parentAnimations = GlassBackdropScope.animationsEnabledOf(context);
     return AnimatedBuilder(
       animation: open,
@@ -661,7 +660,6 @@ class _ComposerGlass extends StatelessWidget {
         final moving = open.value > 0 && open.value < 1;
         return GlassBackdropScope(
           enabled: parentSampling && !moving,
-          translucentWhenDisabled: parentTranslucent,
           animationsEnabled: parentAnimations,
           child: GlassSurface(
             tier: GlassTier.chrome,

@@ -2688,7 +2688,6 @@ class _RouteInteractionScopeState extends State<_RouteInteractionScope> {
     final uncovered = !AppBackdrop.snapshotCaching || current;
     return GlassBackdropScope(
       enabled: GlassBackdropScope.enabledOf(context) && uncovered,
-      translucentWhenDisabled: GlassBackdropScope.translucentWhenDisabledOf(context),
       animationsEnabled: GlassBackdropScope.animationsEnabledOf(context) && uncovered,
       child: widget.child,
     );
@@ -2719,9 +2718,7 @@ class _ChatKeyboardInsetScope extends InheritedWidget {
   bool updateShouldNotify(_ChatKeyboardInsetScope oldWidget) => inset != oldWidget.inset;
 }
 
-/// Wraps `_Slot.composer` in a single `RepaintBoundary` + `BackdropGroup`, and
-/// skips offscreen `BackdropFilter` readbacks when the solid gradient
-/// `BackdropVeil` behind it has no custom wallpaper picture.
+/// Wraps `_Slot.composer` in a single `RepaintBoundary` + `BackdropGroup`.
 class _ComposerVeilScope extends StatelessWidget {
   const _ComposerVeilScope({required this.child});
 
@@ -2729,20 +2726,11 @@ class _ComposerVeilScope extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final parentSampling = GlassBackdropScope.enabledOf(context);
-    final parentTranslucent = GlassBackdropScope.translucentWhenDisabledOf(context);
-    final parentAnimations = GlassBackdropScope.animationsEnabledOf(context);
-    final skipVeilBlur = AppBackdrop.snapshotCaching && !BackdropVeilSampling.hasPictureOf(context);
-    final scoped = GlassBackdropScope(
-      enabled: parentSampling && !skipVeilBlur,
-      translucentWhenDisabled: parentTranslucent || skipVeilBlur,
-      animationsEnabled: parentAnimations,
-      child: BackdropGroup(
-        child: SafeArea(
-          top: false,
-          minimum: const EdgeInsets.only(bottom: 8),
-          child: child,
-        ),
+    final scoped = BackdropGroup(
+      child: SafeArea(
+        top: false,
+        minimum: const EdgeInsets.only(bottom: 8),
+        child: child,
       ),
     );
     return AppBackdrop.snapshotCaching ? RepaintBoundary(child: scoped) : scoped;

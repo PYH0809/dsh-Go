@@ -154,12 +154,6 @@ class _BackdropScope extends InheritedWidget {
   bool updateShouldNotify(_BackdropScope old) => old.picture != picture;
 }
 
-extension BackdropVeilSampling on AppBackdrop {
-  /// Whether the nearest [AppBackdrop] currently paints a custom wallpaper
-  /// picture (as opposed to the smooth default gradient).
-  static bool hasPictureOf(BuildContext context) => _BackdropScope.of(context) != null;
-}
-
 /// [AppBackdrop] 的一角:同一张背景,只画底部 [solidHeight] + [feather] 这一条,
 /// 底部 [solidHeight] 实心,往上 [feather] 缓缓淡出。
 ///

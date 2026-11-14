@@ -252,4 +252,41 @@ void main() {
     expect(_blurring(tester), isTrue, reason: 'blur resumes once DraggableScrollableSheet settles');
     expect(_settled(tester), 1);
   });
+
+  testWidgets('sheet glass keeps real BackdropFilter enabled at rest even when AppBackdrop.snapshotCaching is true', (
+    tester,
+  ) async {
+    final oldSnapshotCaching = AppBackdrop.snapshotCaching;
+    AppBackdrop.snapshotCaching = true;
+    addTearDown(() => AppBackdrop.snapshotCaching = oldSnapshotCaching);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildLightTheme(),
+        home: AppBackdrop(
+          child: Builder(
+            builder: (context) => Scaffold(
+              backgroundColor: Colors.transparent,
+              body: Column(
+                children: [
+                  const Text('底层抽屉文字不应清晰直透'),
+                  TextButton(
+                    onPressed: () => showAppSheet<void>(
+                      context,
+                      builder: (_) => const SizedBox(height: 240, child: Text('工作区弹层')),
+                    ),
+                    child: const Text('打开'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('打开'));
+    await tester.pumpAndSettle();
+    expect(_blurring(tester), isTrue, reason: 'resting modal sheet must sample real sigma=24 backdrop blur in production');
+    expect(_settled(tester), 1);
+  });
 }
