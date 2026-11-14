@@ -178,6 +178,20 @@ class _DockStackState extends ConsumerState<DockStack> with TickerProviderStateM
       _spread.forward();
     }
     final accessory = widget.accessory;
+    // Animation ticks only update geometry, not the cards' widget trees.
+    final children = [
+      // Folded, the deck takes the tap: the cards neither answer it nor read out.
+      for (final card in widget.cards)
+        IgnorePointer(
+          ignoring: folded,
+          child: ExcludeSemantics(excluding: folded, child: card),
+        ),
+      ?accessory,
+      ExcludeSemantics(
+        excluding: !deck || folded,
+        child: _FoldButton(onTap: () => _fold(true)),
+      ),
+    ];
     final parentSampling = GlassBackdropScope.enabledOf(context);
     final layout = AnimatedBuilder(
       animation: Listenable.merge([_curve, _turn]),
@@ -194,19 +208,7 @@ class _DockStackState extends ConsumerState<DockStack> with TickerProviderStateM
             turn: _turn.value,
             hasAccessory: accessory != null,
             onShown: _onShown,
-            children: [
-              // Folded, the deck takes the tap: the cards neither answer it nor read out.
-              for (final card in widget.cards)
-                IgnorePointer(
-                  ignoring: folded,
-                  child: ExcludeSemantics(excluding: folded, child: card),
-                ),
-              ?accessory,
-              ExcludeSemantics(
-                excluding: !deck || folded,
-                child: _FoldButton(onTap: () => _fold(true)),
-              ),
-            ],
+            children: children,
           ),
         );
       },
@@ -374,8 +376,10 @@ class RenderDockStack extends RenderBox
     if (child.parentData is! DockStackParentData) child.parentData = DockStackParentData();
   }
 
+  // paint() creates opacity, transform and clip layers directly, so compositing
+  // must not depend on whether a child happens to enable BackdropFilter.
   @override
-  bool get isRepaintBoundary => false;
+  bool get alwaysNeedsCompositing => true;
 
   List<RenderBox> get _children {
     final all = <RenderBox>[];
@@ -483,12 +487,14 @@ class RenderDockStack extends RenderBox
       final top = spreadFront == null
           ? 0.0
           : mix(mix(a.frontTop, b.frontTop, f), spreadY[spreadFront], t);
+      final visibleHeight = (deckHeight - top).clamp(0.0, side.height);
       data
         ..offset = Offset(width - side.width, top)
         ..scale = 1
         ..opacity = mix(mix(a.frontWeight, b.frontWeight, f), spreadFront == null ? 0 : _weight(height(spreadFront)), t)
-        // Rising with the front card, not below the deck.
-        ..clipHeight = (deckHeight - top).clamp(0.0, side.height)
+        // Clip only while rising. At full height the shadow must spill just
+        // like the cards' shadows, rather than end in a hard horizontal band.
+        ..clipHeight = DockSlot.unclipSettledShadow && visibleHeight >= side.height ? null : visibleHeight
         ..depth = spreadFront == null ? null : -1;
     }
 

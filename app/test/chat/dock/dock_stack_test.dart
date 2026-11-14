@@ -7,6 +7,7 @@
 
 import 'package:dsh_app/ui/chat/dock/dock_pill.dart';
 import 'package:dsh_app/ui/chat/dock/dock_stack.dart';
+import 'package:dsh_app/ui/theme/theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -38,6 +39,74 @@ class _Card extends StatelessWidget {
   );
 }
 
+/// Uses the real chrome material rather than the solid geometry fixture.
+/// Its State must survive folding just as an open TodoBar's State does.
+class _GlassCard extends StatefulWidget {
+  const _GlassCard(this.label, {super.key, this.editable = false});
+
+  final String label;
+  final bool editable;
+
+  @override
+  State<_GlassCard> createState() => _GlassCardState();
+}
+
+class _GlassCardState extends State<_GlassCard> {
+  final controller = TextEditingController();
+
+  @override
+  void dispose() {
+    controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(bottom: DockMetrics.gap),
+    child: GlassSurface(
+      key: ValueKey('glass-${widget.label}'),
+      tier: GlassTier.chrome,
+      grouped: true,
+      stadium: true,
+      child: SizedBox(
+        height: DockMetrics.height,
+        child: widget.editable ? TextField(controller: controller) : Center(child: Text(widget.label)),
+      ),
+    ),
+  );
+}
+
+const _dockSurfaces = ['glass-todo', 'glass-goal', 'glass-strip', 'glass-accessory', 'dock-fold'];
+
+void _expectDockSampling(WidgetTester tester, {required bool enabled}) {
+  for (final label in _dockSurfaces) {
+    final surface = find.byKey(ValueKey(label));
+    expect(surface, findsOneWidget, reason: label);
+    expect(tester.widget(surface), isA<GlassSurface>(), reason: '$label retains its chrome material');
+    final filter = find.descendant(of: surface, matching: find.byType(BackdropFilter));
+    expect(filter, findsOneWidget);
+    expect(
+      tester.widget<BackdropFilter>(filter).enabled,
+      enabled,
+      reason: '$label samples at rest, unless an ancestor already suspended sampling',
+    );
+    final style = DshSurfaces.of(tester.element(surface)).chrome;
+    final fill = tester
+        .widgetList<DecoratedBox>(find.descendant(of: surface, matching: find.byType(DecoratedBox)))
+        .map((box) => box.decoration)
+        .whereType<ShapeDecoration>()
+        .single
+        .color;
+    expect(fill, enabled ? style.fill : style.fallbackFill, reason: '$label restores its original fill at rest');
+  }
+  final outside = find.descendant(
+    of: find.byKey(const ValueKey('outside-chrome')),
+    matching: find.byType(BackdropFilter),
+  );
+  expect(outside, findsOneWidget, reason: 'the dock must not disable blur elsewhere on the page');
+  expect(tester.widget<BackdropFilter>(outside).enabled, isTrue);
+}
+
 /// A bar that rises in on its own, like the activity strip.
 class _Rising extends StatefulWidget {
   const _Rising();
@@ -67,20 +136,53 @@ class _RisingState extends State<_Rising> with SingleTickerProviderStateMixin {
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: _rise,
-    builder: (context, child) =>
-        ClipRect(child: Align(alignment: Alignment.topCenter, heightFactor: _rise.value, child: child)),
+    builder: (context, child) => ClipRect(
+      child: Align(alignment: Alignment.topCenter, heightFactor: _rise.value, child: child),
+    ),
     child: const _Card('rising'),
   );
 }
 
-Widget _deck(List<Widget> cards, {Widget? accessory}) => testApp(
-  Scaffold(
-    body: Align(
-      alignment: Alignment.bottomCenter,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 0, 12, 80),
-        child: DockStack(cards: cards, accessory: accessory),
+Widget _deck(List<Widget> cards, {Widget? accessory, PreferredSizeWidget? appBar, bool backdropEnabled = true}) =>
+    testApp(
+      Scaffold(
+        appBar: appBar,
+        body: Align(
+          alignment: Alignment.bottomCenter,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 80),
+            // As on ChatScreen, the dock inherits a shared backdrop group.
+            child: BackdropGroup(
+              child: GlassBackdropScope(
+                enabled: backdropEnabled,
+                child: DockStack(cards: cards, accessory: accessory),
+              ),
+            ),
+          ),
+        ),
       ),
+    );
+
+Widget _glassDeck({bool backdropEnabled = true}) => _deck(
+  const [
+    _GlassCard('todo', key: ValueKey('state-todo')),
+    _GlassCard('goal', key: ValueKey('state-goal'), editable: true),
+    _GlassCard('strip', key: ValueKey('state-strip')),
+  ],
+  backdropEnabled: backdropEnabled,
+  accessory: const GlassSurface(
+    key: ValueKey('glass-accessory'),
+    tier: GlassTier.chrome,
+    grouped: true,
+    circle: true,
+    child: SizedBox.square(dimension: DockMetrics.height),
+  ),
+  appBar: const PreferredSize(
+    preferredSize: Size.fromHeight(DockMetrics.height),
+    child: GlassSurface(
+      key: ValueKey('outside-chrome'),
+      tier: GlassTier.chrome,
+      child: SizedBox(height: DockMetrics.height),
     ),
   ),
 );
@@ -116,7 +218,10 @@ void main() {
     await pumpFrames(tester);
     expect(taps, 0);
     expect(_deckHeight(tester), 3 * _bar);
-    expect(tester.getRect(find.byKey(const ValueKey('goal'))).top - tester.getRect(find.byKey(const ValueKey('todo'))).top, _bar);
+    expect(
+      tester.getRect(find.byKey(const ValueKey('goal'))).top - tester.getRect(find.byKey(const ValueKey('todo'))).top,
+      _bar,
+    );
     // The fold button beside the top card: no row of its own.
     final fold = tester.getRect(find.byKey(const ValueKey('dock-fold')));
     final top = tester.getRect(find.byKey(const ValueKey('todo')));
@@ -136,6 +241,176 @@ void main() {
     await pumpFrames(tester);
     expect(_deckHeight(tester), 2 * DockStackMetrics.peek + _bar);
     expect((await SharedPreferences.getInstance()).getBool(DockFoldController.key), isTrue);
+  });
+
+  testWidgets('dock samples at rest, suspends during motion, and preserves State, draft and selection', (tester) async {
+    usePhoneView(tester);
+    final builds = <String, int>{};
+    final previousRebuild = debugOnRebuildDirtyWidget;
+    debugOnRebuildDirtyWidget = (element, builtOnce) {
+      previousRebuild?.call(element, builtOnce);
+      final widget = element.widget;
+      final key = widget.key;
+      if (widget is GlassSurface && key is ValueKey<String> && _dockSurfaces.contains(key.value)) {
+        builds.update(key.value, (count) => count + 1, ifAbsent: () => 1);
+      }
+    };
+    addTearDown(() => debugOnRebuildDirtyWidget = previousRebuild);
+    await tester.pumpWidget(_glassDeck());
+    await pumpFrames(tester);
+    _expectDockSampling(tester, enabled: true);
+    expect(builds.keys, unorderedEquals(_dockSurfaces));
+    final states = {
+      for (final label in ['todo', 'goal', 'strip'])
+        label: tester.state<_GlassCardState>(find.byKey(ValueKey('state-$label'))),
+    };
+    final filters = {
+      for (final label in _dockSurfaces)
+        label: tester.element(find.descendant(of: find.byKey(ValueKey(label)), matching: find.byType(BackdropFilter))),
+    };
+    final field = tester.element(find.byType(TextField));
+    const draft = TextEditingValue(text: 'live draft', selection: TextSelection(baseOffset: 2, extentOffset: 7));
+    states['goal']!.controller.value = draft;
+    await tester.pump();
+
+    void checkIdentity() {
+      for (final entry in states.entries) {
+        expect(tester.state<_GlassCardState>(find.byKey(ValueKey('state-${entry.key}'))), same(entry.value));
+      }
+      for (final entry in filters.entries) {
+        expect(
+          tester.element(find.descendant(of: find.byKey(ValueKey(entry.key)), matching: find.byType(BackdropFilter))),
+          same(entry.value),
+        );
+      }
+      expect(tester.element(find.byType(TextField)), same(field));
+      expect(states['goal']!.controller.value, draft);
+    }
+
+    Future<void> checkMotion() async {
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 30));
+      _expectDockSampling(tester, enabled: false);
+      final before = Map<String, int>.of(builds);
+      for (var frame = 0; frame < 3; frame++) {
+        await tester.pump(const Duration(milliseconds: 30));
+        _expectDockSampling(tester, enabled: false);
+        expect(builds, before, reason: 'geometry-only ticks do not rebuild glass');
+        checkIdentity();
+      }
+      // The completion tick itself restores sampling; no unrelated rebuild is needed.
+      await tester.pump(const Duration(milliseconds: 400));
+      _expectDockSampling(tester, enabled: true);
+      checkIdentity();
+      expect(tester.takeException(), isNull);
+    }
+
+    await tester.tapAt(tester.getCenter(find.byKey(const ValueKey('glass-strip'))));
+    await checkMotion();
+    expect(_deckHeight(tester), 3 * _bar);
+    await tester.tap(find.byKey(const ValueKey('dock-fold')));
+    await checkMotion();
+    expect(_deckHeight(tester), 2 * DockStackMetrics.peek + _bar);
+
+    // A held fractional drag has no running controller, but is not a settled card.
+    final drag = await tester.startGesture(tester.getCenter(find.byKey(const ValueKey('glass-strip'))));
+    await drag.moveBy(const Offset(0, 20));
+    await drag.moveBy(const Offset(0, 12));
+    await tester.pump();
+    final render = tester.allRenderObjects.whereType<RenderDockStack>().toSet().single;
+    expect(render.turn, greaterThan(0));
+    expect(render.turn, lessThan(1));
+    _expectDockSampling(tester, enabled: false);
+    await tester.pump(const Duration(milliseconds: 500));
+    _expectDockSampling(tester, enabled: false);
+    checkIdentity();
+    await drag.up();
+    await checkMotion();
+    expect(render.turn, render.turn.roundToDouble());
+  });
+
+  testWidgets('dock never overrides an ancestor suspension, including at stable endpoints', (tester) async {
+    usePhoneView(tester);
+    await tester.pumpWidget(_glassDeck(backdropEnabled: false));
+    await pumpFrames(tester);
+    _expectDockSampling(tester, enabled: false);
+    await tester.tapAt(tester.getCenter(find.byKey(const ValueKey('glass-strip'))));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 60));
+    _expectDockSampling(tester, enabled: false);
+    // The ancestor can resume while the deck is still moving; it must stay suspended.
+    await tester.pumpWidget(_glassDeck());
+    _expectDockSampling(tester, enabled: false);
+    await tester.pump(const Duration(milliseconds: 400));
+    _expectDockSampling(tester, enabled: true);
+    await tester.pumpWidget(_glassDeck(backdropEnabled: false));
+    _expectDockSampling(tester, enabled: false);
+    await tester.tap(find.byKey(const ValueKey('dock-fold')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 60));
+    _expectDockSampling(tester, enabled: false);
+    await tester.pump(const Duration(milliseconds: 400));
+    _expectDockSampling(tester, enabled: false);
+    await tester.pumpWidget(_glassDeck());
+    _expectDockSampling(tester, enabled: true);
+  });
+
+  testWidgets('reduced motion lands on sampling endpoints without a later animation tick', (tester) async {
+    usePhoneView(tester);
+    tester.platformDispatcher.accessibilityFeaturesTestValue = const FakeAccessibilityFeatures(disableAnimations: true);
+    addTearDown(tester.platformDispatcher.clearAccessibilityFeaturesTestValue);
+    await tester.pumpWidget(_glassDeck());
+    await pumpFrames(tester);
+    _expectDockSampling(tester, enabled: true);
+    await tester.tapAt(tester.getCenter(find.byKey(const ValueKey('glass-strip'))));
+    await tester.pump();
+    _expectDockSampling(tester, enabled: true);
+    expect(_deckHeight(tester), 3 * _bar);
+    await tester.tap(find.byKey(const ValueKey('dock-fold')));
+    await tester.pump();
+    _expectDockSampling(tester, enabled: true);
+    expect(_deckHeight(tester), 2 * DockStackMetrics.peek + _bar);
+  });
+
+  testWidgets('solid cards still declare compositing for the deck opacity layers', (tester) async {
+    usePhoneView(tester);
+    final base = buildLightTheme(glassBlur: false);
+    final surfaces = base.extension<DshSurfaces>()!;
+    final solidTheme = base.copyWith(
+      extensions: [
+        ...base.extensions.values,
+        surfaces.copyWith(chrome: surfaces.chrome.copyWith(shadows: const [])),
+      ],
+    );
+    await tester.pumpWidget(
+      testApp(
+        Theme(
+          data: solidTheme,
+          child: Scaffold(
+            body: Align(
+              alignment: Alignment.bottomCenter,
+              child: DockStack(cards: const [_Card('todo'), _Card('goal'), _Card('strip')]),
+            ),
+          ),
+        ),
+      ),
+    );
+    await pumpFrames(tester);
+    expect(find.byType(BackdropFilter), findsNothing);
+    final deck = tester.allRenderObjects.whereType<RenderDockStack>().toSet().single;
+    final children = <RenderObject>[];
+    deck.visitChildren(children.add);
+    expect(children.every((child) => !child.needsCompositing), isTrue, reason: 'no descendant supplies compositing');
+    expect(
+      children.any((child) {
+        final data = child.parentData! as DockStackParentData;
+        return data.depth != null && data.opacity > 0 && data.opacity < 1;
+      }),
+      isTrue,
+      reason: 'the folded deck actually needs to push an opacity layer',
+    );
+    expect(deck.needsCompositing, isTrue, reason: 'its clips and transforms must also apply to pushOpacity layers');
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('the fold moves, it does not jump', (tester) async {
@@ -282,6 +557,29 @@ void main() {
     expect(off, 1);
     // Still folded.
     expect(_deckHeight(tester), DockStackMetrics.peek + _bar);
+  });
+
+  testWidgets('the accessory clips while rising but releases its shadow at full height', (tester) async {
+    DockSlot.unclipSettledShadow = true;
+    addTearDown(() => DockSlot.unclipSettledShadow = false);
+    usePhoneView(tester);
+    final height = ValueNotifier<double>(12);
+    addTearDown(height.dispose);
+    await tester.pumpWidget(
+      _deck([
+        ValueListenableBuilder<double>(
+          valueListenable: height,
+          builder: (context, h, _) => SizedBox(width: double.infinity, height: h),
+        ),
+      ], accessory: const SizedBox(key: ValueKey('shadow-accessory'), width: 36, height: 36)),
+    );
+    await pumpFrames(tester);
+    final accessory = tester.renderObject(find.byKey(const ValueKey('shadow-accessory')));
+    expect((accessory.parentData! as DockStackParentData).clipHeight, 12);
+    height.value = _bar;
+    await tester.pump();
+    expect((accessory.parentData! as DockStackParentData).clipHeight, isNull);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('a card growing in at the front slides over the one behind, without a jump', (tester) async {

@@ -169,6 +169,12 @@ class DockSlot extends StatefulWidget {
   /// Null: nothing to show.
   final Widget? child;
 
+  /// Whether settled slots drop their `ClipRect` so soft outer shadows spill
+  /// past the slot bottom. Disabled in `flutter_test_config.dart` so existing
+  /// clipped golden baselines stay 0px identical while `dock_slot_shadow_test`
+  /// verifies unclipped shadow pixels explicitly.
+  static bool unclipSettledShadow = true;
+
   @override
   State<DockSlot> createState() => _DockSlotState();
 }
@@ -184,6 +190,7 @@ class _DockSlotState extends State<DockSlot> {
     if (last == null) return const SizedBox(width: double.infinity);
     return ExpandReveal(
       open: child != null,
+      clipWhenExpanded: !DockSlot.unclipSettledShadow,
       duration: AppMotion.standard,
       curve: AppMotion.std,
       child: Padding(

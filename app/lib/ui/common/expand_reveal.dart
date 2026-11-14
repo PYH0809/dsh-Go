@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/widgets.dart';
 
 import '../theme/motion.dart';
@@ -16,6 +18,8 @@ class ExpandReveal extends StatefulWidget {
     required this.child,
     this.duration = AppMotion.collapse,
     this.curve = AppMotion.collapseCurve,
+    this.clipWhenExpanded = true,
+    this.keepState = false,
   });
 
   final bool open;
@@ -24,6 +28,14 @@ class ExpandReveal extends StatefulWidget {
 
   /// 高度的缓动;要和别处同时动的东西(比如输入条上的胶囊)同步时换掉。
   final Curve curve;
+
+  /// Keep clipping at full height. Disable for surfaces whose shadows should
+  /// extend outside the reveal once it has finished opening.
+  final bool clipWhenExpanded;
+
+  /// Keep [child] mounted offstage at 0 height after the first open, so
+  /// repeated toggles do not re-create and re-layout a heavy subtree.
+  final bool keepState;
 
   @override
   State<ExpandReveal> createState() => _ExpandRevealState();
@@ -48,6 +60,7 @@ class _ExpandRevealState extends State<ExpandReveal> with SingleTickerProviderSt
     parent: _controller,
     curve: const Interval(0.3, 1, curve: Curves.easeOut),
   );
+  late bool _everOpened = widget.open;
 
   @override
   void didChangeDependencies() {
@@ -58,6 +71,7 @@ class _ExpandRevealState extends State<ExpandReveal> with SingleTickerProviderSt
   @override
   void didUpdateWidget(ExpandReveal oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (widget.open) _everOpened = true;
     _controller.duration = AppMotion.of(context, widget.duration);
     if (widget.open != oldWidget.open) {
       if (widget.open) {
@@ -76,19 +90,37 @@ class _ExpandRevealState extends State<ExpandReveal> with SingleTickerProviderSt
 
   @override
   Widget build(BuildContext context) {
-    if (!widget.open && _controller.isDismissed) {
+    final closed = !widget.open && _controller.isDismissed;
+    if (closed && !(widget.keepState && _everOpened)) {
       return const SizedBox.shrink();
     }
-    // SizeTransition 内部用 Align 摆放子组件,横向约束会被放松;这里把
+    // Align 摆放子组件时横向约束会被放松;这里把
     // 宽度钉回父级的宽度,内容不会缩成一团居中。
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        Widget child = FadeTransition(opacity: _fade, child: widget.child);
-        if (constraints.hasBoundedWidth) {
-          child = SizedBox(width: constraints.maxWidth, child: child);
-        }
-        return SizeTransition(sizeFactor: _size, alignment: AlignmentDirectional.topStart, child: child);
-      },
+    return Offstage(
+      offstage: closed,
+      child: TickerMode(
+        enabled: !closed && TickerMode.valuesOf(context).enabled,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            Widget child = FadeTransition(opacity: _fade, child: widget.child);
+            if (constraints.hasBoundedWidth) {
+              child = SizedBox(width: constraints.maxWidth, child: child);
+            }
+            return AnimatedBuilder(
+              animation: _size,
+              child: child,
+              builder: (context, child) => ClipRect(
+                clipBehavior: widget.clipWhenExpanded || !_controller.isCompleted ? Clip.hardEdge : Clip.none,
+                child: Align(
+                  alignment: AlignmentDirectional.topStart,
+                  heightFactor: math.max(_size.value, 0.0),
+                  child: child,
+                ),
+              ),
+            );
+          },
+        ),
+      ),
     );
   }
 }
