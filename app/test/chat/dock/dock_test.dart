@@ -3,9 +3,11 @@
 // opens in place, when they come and go, and the goal actions end to end.
 
 import 'package:dsh_app/state/chat_state.dart';
+import 'package:dsh_app/ui/chat/dock/chat_dock.dart';
 import 'package:dsh_app/ui/chat/dock/dock_pill.dart';
 import 'package:dsh_app/ui/chat/dock/dock_stack.dart';
 import 'package:dsh_app/ui/chat/dock/goal_bar.dart';
+import 'package:dsh_app/ui/chat/dock/goal_sheet.dart';
 import 'package:dsh_app/ui/chat/dock/todo_bar.dart';
 import 'package:dsh_app/ui/chat/run_info.dart';
 import 'package:dsh_app/ui/chat/widgets/activity_strip.dart';
@@ -64,6 +66,7 @@ void main() {
       await tester.tap(find.text('3/7 · 正在：跑测试'));
       await pumpFrames(tester, 6);
       expect(find.byType(TodoDockRow), findsNothing);
+      expect(find.byType(TodoDockRow, skipOffstage: false), findsNWidgets(7), reason: 'retained offstage for fast reopen');
       expect(tester.getRect(find.byType(TodoBar)), folded);
     });
 
@@ -240,6 +243,47 @@ void main() {
       await tester.pumpAndSettle();
       expect(backend.calls, ['pause s1 goal-1@1']);
       expect(find.text('已暂停'), findsOneWidget);
+    });
+
+    testWidgets('a goal sheet opened from the frosted deck still samples its backdrop at rest', (tester) async {
+      SharedPreferences.setMockInitialValues({DockFoldController.key: false});
+      final goal = goalOf(rounds: 3);
+      final backend = FakeGoalBackend(canRead: false)..current = goal;
+      await DockHarness(
+        state: _state(todos: todosRunning, goal: goal),
+        backend: backend,
+      ).pump(tester, deck: true, composer: false);
+      await pumpFrames(tester);
+      expect(
+        find.descendant(of: find.byType(DockStack), matching: find.byType(GoalDockSlot)),
+        findsOneWidget,
+        reason: 'open the sheet from the real dock slot after its motion settles',
+      );
+      expect(
+        find.descendant(
+          of: find.byType(DockStack),
+          matching: find.byWidgetPredicate((widget) => widget is BackdropFilter && widget.enabled),
+        ),
+        findsWidgets,
+        reason: 'the settled dock restores its original glass sampling',
+      );
+
+      await tester.tap(find.byType(GoalBar));
+      await tester.pumpAndSettle();
+      expect(find.byType(GoalSheet), findsOneWidget);
+      final sheetFilter = find.ancestor(of: find.byType(GoalSheet), matching: find.byType(BackdropFilter));
+      expect(sheetFilter, findsOneWidget, reason: 'the modal route retains its own glass surface');
+      expect(tester.widget<BackdropFilter>(sheetFilter).enabled, isTrue, reason: 'settled sheets retain live glass');
+      expect(
+        find.descendant(
+          of: find.byType(DockStack),
+          matching: find.byWidgetPredicate((widget) => widget is BackdropFilter && widget.enabled),
+        ),
+        findsWidgets,
+        reason: 'opening a sheet does not change the settled dock sampling policy',
+      );
+      expect(backend.calls, isEmpty, reason: 'opening the sheet does not modify the goal');
+      expect(tester.takeException(), isNull);
     });
 
     testWidgets('a disarmed goal offers 恢复', (tester) async {
