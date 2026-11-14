@@ -62,7 +62,7 @@ case "$flavor" in
   all) flavors=(arm64 x64) ;;
   *) die "flavor is arm64, x64 or all: $flavor" ;;
 esac
-for arg in "${extra[@]}"; do
+for arg in ${extra[@]+"${extra[@]}"}; do
   case "$arg" in
     # The selected mode also controls the runtime preflight below.
     --build-number* | --build-name* | --flavor* | --target-platform* | \
@@ -115,7 +115,7 @@ for f in "${flavors[@]}"; do
     --build-name "$name" --build-number "$code" "--dart-define=DSH_APP_VERSION=$name+$code")
   [[ -n $target ]] && cmd+=(-t "$target")
   ((beta)) && cmd+=("--dart-define-from-file=$beta_json")
-  cmd+=("${extra[@]}")
+  ((${#extra[@]})) && cmd+=("${extra[@]}")
   commands+=("$(printf '%q ' "${cmd[@]}")")
 done
 

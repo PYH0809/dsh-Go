@@ -39,7 +39,7 @@ from build_number import MAX_VERSION_CODE, decode
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 FLAVORS = ("arm64", "x64")
 FLAVOR_ABI = {"arm64": "arm64-v8a", "x64": "x86_64"}
-REPO = "ccch1mneyyy/dsh-go"
+REPO = os.environ.get("DSH_RELEASE_REPO", "ccch1mneyyy/dsh-go")
 VERSION_RE = re.compile(r"^(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)(?:\+(\d+))?$")
 BADGING_RE = re.compile(r"^package: .*?\bversionCode='(\d*)' versionName='([^']*)'", re.MULTILINE)
 CACHE = pathlib.Path.home() / ".cache" / "dshgo-release" / "apk"
@@ -211,6 +211,10 @@ def main() -> None:
     parser.add_argument("--out", type=pathlib.Path, default=ROOT / "dist")
     parser.add_argument("--base-url", help="absolute or relative URL prefix for the APKs in update.json")
     parser.add_argument(
+        "--tag",
+        help="explicit release tag (default: v<version>); e.g. v1.0.16-b11140030 for continuous main builds",
+    )
+    parser.add_argument(
         "--delta-from",
         type=int,
         default=3,
@@ -270,7 +274,7 @@ def main() -> None:
             entry["url"] = args.base_url.rstrip("/") + "/" + asset
         assets[flavor] = entry
 
-    tag = f"v{name}"
+    tag = args.tag or f"v{name}"
     for stale in args.out.glob("*.dshdelta"):
         stale.unlink()
     patches = []
