@@ -765,7 +765,11 @@ class ChatController extends Notifier<ChatState> {
                   _markSyncing();
                   if (!_syncReady.isCompleted) _syncReady.complete(false);
                   unawaited(_sub?.cancel());
-                  state = state.copyWith(streamLost: true, loading: false);
+                  state = state.copyWith(
+                    syncError: state.syncError ?? appL10n.stateChatSyncInterrupted,
+                    streamLost: true,
+                    loading: false,
+                  );
                 }
                 return false;
               },
@@ -930,7 +934,11 @@ class ChatController extends Notifier<ChatState> {
             _watchEnded = true;
             _markSyncing();
             if (!_syncReady.isCompleted) _syncReady.complete(false);
-            state = state.copyWith(streamLost: true, loading: false);
+            state = state.copyWith(
+              syncError: state.syncError ?? appL10n.stateChatSyncInterrupted,
+              streamLost: true,
+              loading: false,
+            );
           },
         );
   }

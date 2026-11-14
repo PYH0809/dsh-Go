@@ -146,7 +146,7 @@ void main() {
       tester,
       ChatHarness(
         session: 's1',
-        states: {'s1': const ChatState(loading: false, streamLost: true, error: '对话同步中断')},
+        states: {'s1': const ChatState(loading: false, streamLost: true, error: '对话同步中断', syncError: '对话同步中断')},
       ),
     );
     expect(find.text('连接已断开'), findsOneWidget);

@@ -2044,25 +2044,28 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
                                     duration: AppMotion.of(context, AppMotion.standard),
                                     curve: AppMotion.std,
                                     alignment: Alignment.bottomCenter,
+                                    // Normal sync belongs in the header; only a follow failure
+                                    // needs recovery here. Keep stale action errors out while waiting.
                                     child: connected && sessionId != null && !(chat?.controlReady ?? true)
-                                        ? Padding(
-                                            padding: const EdgeInsets.only(bottom: 8),
-                                            child: ErrorBanner(
-                                              maxLines: null,
-                                              info: !(chat?.streamLost ?? false),
-                                              message: chat?.streamLost ?? false
-                                                  ? chat?.syncError ?? l10n.stateChatSyncInterrupted
-                                                  : l10n.stateChatSynchronizing,
-                                              action: chat?.resyncing ?? false
-                                                  ? null
-                                                  : (
-                                                      label: l10n.stateChatSyncRetry,
-                                                      onPressed: () {
-                                                        unawaited(ref.read(chatProvider(sessionId).notifier).resync());
-                                                      },
-                                                    ),
-                                            ),
-                                          )
+                                        ? chat?.syncError == null
+                                              ? const SizedBox(width: double.infinity)
+                                              : Padding(
+                                                  padding: const EdgeInsets.only(bottom: 8),
+                                                  child: ErrorBanner(
+                                                    maxLines: null,
+                                                    message: chat!.syncError!,
+                                                    action: chat.resyncing
+                                                        ? null
+                                                        : (
+                                                            label: l10n.stateChatSyncRetry,
+                                                            onPressed: () {
+                                                              unawaited(
+                                                                ref.read(chatProvider(sessionId).notifier).resync(),
+                                                              );
+                                                            },
+                                                          ),
+                                                  ),
+                                                )
                                         : error == null && notice == null
                                         ? const SizedBox(width: double.infinity)
                                         : notice != null
