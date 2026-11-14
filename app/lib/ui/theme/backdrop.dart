@@ -213,25 +213,12 @@ class BackdropVeil extends StatelessWidget {
         ),
       );
     }
-    if (fromTop) {
-      final band = (solidHeight.value + feather).clamp(0.0, area.height);
-      return IgnorePointer(
-        child: Align(
-          alignment: Alignment.topCenter,
-          child: SizedBox(
-            width: double.infinity,
-            height: band,
-            child: _CachedBandVeil(solidHeight: solidHeight, painter: bandPainter),
-          ),
-        ),
-      );
-    }
     return IgnorePointer(
       child: _VeilBandLayout(
         solidHeight: solidHeight,
         feather: feather,
         fromTop: fromTop,
-        child: _CachedBandVeil(solidHeight: solidHeight, painter: bandPainter),
+        child: _CachedBandVeil(painter: bandPainter),
       ),
     );
   }
@@ -328,9 +315,8 @@ class _RenderVeilBandLayout extends RenderShiftedBox {
 }
 
 class _CachedBandVeil extends StatefulWidget {
-  const _CachedBandVeil({required this.solidHeight, required this.painter});
+  const _CachedBandVeil({required this.painter});
 
-  final ValueListenable<double> solidHeight;
   final _BandVeilPainter painter;
 
   @override

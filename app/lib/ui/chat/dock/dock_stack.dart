@@ -182,6 +182,10 @@ class _DockStackState extends ConsumerState<DockStack> with TickerProviderStateM
     final layout = AnimatedBuilder(
       animation: Listenable.merge([_curve, _turn]),
       builder: (context, _) {
+        // Suspend BackdropFilter readbacks while cards overlap and translate
+        // with fractional opacity (`_spread` / `_turn`), which otherwise blends
+        // into gray rectangular artifacts on Impeller OpenGLES; exact endpoints
+        // restore live sampling seamlessly.
         final moving = (_spread.value > 0 && _spread.value < 1) || _turn.value != _turn.value.roundToDouble();
         return GlassBackdropScope(
           enabled: parentSampling && !moving,
