@@ -4,6 +4,8 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
+import 'package:flutter/scheduler.dart';
 
 import 'backdrop_frame.dart';
 import 'surfaces.dart';
@@ -37,6 +39,13 @@ class AppBackdrop extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final s = DshSurfaces.of(context);
+    final painter = _BackdropPainter(
+      top: s.backdropTop,
+      bottom: s.backdropBottom,
+      glowPrimary: glow ? s.glowPrimary : null,
+      glowSecondary: glow ? s.glowSecondary : null,
+      picture: picture,
+    );
     return _BackdropScope(
       picture: picture,
       child: Stack(
@@ -45,23 +54,65 @@ class AppBackdrop extends StatelessWidget {
           Positioned.fill(
             child: IgnorePointer(
               child: RepaintBoundary(
-                child: CustomPaint(
-                  painter: _BackdropPainter(
-                    top: s.backdropTop,
-                    bottom: s.backdropBottom,
-                    glowPrimary: glow ? s.glowPrimary : null,
-                    glowSecondary: glow ? s.glowSecondary : null,
-                    picture: picture,
-                  ),
-                ),
+                child: picture == null ? _CachedGradient(painter: painter) : CustomPaint(painter: painter),
               ),
             ),
           ),
-          Material(type: MaterialType.transparency, child: child),
+          RepaintBoundary(
+            child: Material(type: MaterialType.transparency, child: child),
+          ),
         ],
       ),
     );
   }
+}
+
+// An explicit image avoids re-running the three static gradient shaders on
+// backends without a raster cache. Covered routes release the ~18 MiB texture
+// and recapture it when revealed. Wallpapers, ink and page content stay live.
+class _CachedGradient extends StatefulWidget {
+  const _CachedGradient({required this.painter});
+
+  final _BackdropPainter painter;
+
+  @override
+  State<_CachedGradient> createState() => _CachedGradientState();
+}
+
+class _CachedGradientState extends State<_CachedGradient> {
+  final _controller = SnapshotController(allowSnapshotting: true);
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Release the ~18 MiB texture when a full-screen route covers this page
+    // (ModalRoute sets Offstage/TickerMode=false once covered by an opaque route).
+    final active = TickerMode.valuesOf(context).enabled;
+    if (_controller.allowSnapshotting != active) {
+      _controller.allowSnapshotting = active;
+      if (!active) _controller.clear();
+    }
+  }
+
+  @override
+  void didUpdateWidget(_CachedGradient oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.painter.shouldRepaint(oldWidget.painter)) _controller.clear();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => SnapshotWidget(
+    controller: _controller,
+    // Size and MediaQuery DPR changes invalidate the image inside SnapshotWidget.
+    autoresize: true,
+    child: CustomPaint(painter: widget.painter),
+  );
 }
 
 /// What [AppBackdrop] paints instead of its gradient: [image], baked to the screen's size (the
@@ -109,11 +160,14 @@ class _BackdropScope extends InheritedWidget {
 /// 整页、和页面左上角对齐。分栏布局里的一栏(宽屏的聊天栏、详情栏)由
 /// [BackdropFrame] 告知它在整张背景里的位置,照样对得上。
 class BackdropVeil extends StatelessWidget {
-  const BackdropVeil({super.key, required this.solidHeight, this.feather = 14, this.glow = true}) : fromTop = false;
+  const BackdropVeil({super.key, required this.solidHeight, this.feather = defaultFeather, this.glow = true})
+    : fromTop = false;
+
+  static const defaultFeather = 14.0;
 
   /// 顶部版:从顶边往下 [height] 实心,再往下 [feather] 缓缓淡出(页面顶栏
   /// 后面)。同样要铺满整页、和页面左上角对齐。
-  BackdropVeil.top({super.key, required double height, this.feather = 14, this.glow = true})
+  BackdropVeil.top({super.key, required double height, this.feather = defaultFeather, this.glow = true})
     : solidHeight = _FixedHeight(height),
       fromTop = true;
 
@@ -132,26 +186,264 @@ class BackdropVeil extends StatelessWidget {
   Widget build(BuildContext context) {
     final s = DshSurfaces.of(context);
     final frame = BackdropFrame.maybeOf(context);
-    return IgnorePointer(
-      child: CustomPaint(
-        size: Size.infinite,
-        painter: _VeilPainter(
-          solidHeight: solidHeight,
-          feather: feather,
-          fromTop: fromTop,
-          backdrop: _BackdropPainter(
-            top: s.backdropTop,
-            bottom: s.backdropBottom,
-            glowPrimary: glow ? s.glowPrimary : null,
-            glowSecondary: glow ? s.glowSecondary : null,
-            area: frame?.area ?? MediaQuery.sizeOf(context),
-            origin: frame?.origin ?? Offset.zero,
-            picture: _BackdropScope.of(context),
+    final picture = _BackdropScope.of(context);
+    final area = frame?.area ?? MediaQuery.sizeOf(context);
+    final origin = frame?.origin ?? Offset.zero;
+    final backdrop = _BackdropPainter(
+      top: s.backdropTop,
+      bottom: s.backdropBottom,
+      glowPrimary: glow ? s.glowPrimary : null,
+      glowSecondary: glow ? s.glowSecondary : null,
+      area: area,
+      origin: origin,
+      picture: picture,
+    );
+    final bandPainter = _BandVeilPainter(
+      solidHeight: solidHeight,
+      feather: feather,
+      fromTop: fromTop,
+      pageHeight: area.height,
+      backdrop: backdrop,
+    );
+    if (picture != null) {
+      return IgnorePointer(
+        child: CustomPaint(
+          size: Size.infinite,
+          painter: _VeilPainter(solidHeight: solidHeight, feather: feather, fromTop: fromTop, backdrop: backdrop),
+        ),
+      );
+    }
+    if (fromTop) {
+      final band = (solidHeight.value + feather).clamp(0.0, area.height);
+      return IgnorePointer(
+        child: Align(
+          alignment: Alignment.topCenter,
+          child: SizedBox(
+            width: double.infinity,
+            height: band,
+            child: _CachedBandVeil(solidHeight: solidHeight, painter: bandPainter),
           ),
         ),
+      );
+    }
+    return IgnorePointer(
+      child: _VeilBandLayout(
+        solidHeight: solidHeight,
+        feather: feather,
+        fromTop: fromTop,
+        child: _CachedBandVeil(solidHeight: solidHeight, painter: bandPainter),
       ),
     );
   }
+}
+
+class _VeilBandLayout extends SingleChildRenderObjectWidget {
+  const _VeilBandLayout({
+    required this.solidHeight,
+    required this.feather,
+    required this.fromTop,
+    required super.child,
+  });
+
+  final ValueListenable<double> solidHeight;
+  final double feather;
+  final bool fromTop;
+
+  @override
+  RenderObject createRenderObject(BuildContext context) => _RenderVeilBandLayout(solidHeight, feather, fromTop);
+
+  @override
+  void updateRenderObject(BuildContext context, _RenderVeilBandLayout renderObject) {
+    renderObject
+      ..solidHeight = solidHeight
+      ..feather = feather
+      ..fromTop = fromTop;
+  }
+}
+
+class _RenderVeilBandLayout extends RenderShiftedBox {
+  _RenderVeilBandLayout(this._solidHeight, this._feather, this._fromTop) : super(null);
+
+  ValueListenable<double> _solidHeight;
+  set solidHeight(ValueListenable<double> value) {
+    if (identical(_solidHeight, value)) return;
+    if (attached) _solidHeight.removeListener(_scheduleMarkNeedsLayout);
+    _solidHeight = value;
+    if (attached) _solidHeight.addListener(_scheduleMarkNeedsLayout);
+    markNeedsLayout();
+  }
+
+  double _feather;
+  set feather(double value) {
+    if (_feather == value) return;
+    _feather = value;
+    markNeedsLayout();
+  }
+
+  bool _fromTop;
+  set fromTop(bool value) {
+    if (_fromTop == value) return;
+    _fromTop = value;
+    markNeedsLayout();
+  }
+
+  bool _postFrameScheduled = false;
+
+  void _scheduleMarkNeedsLayout() {
+    if (!attached) return;
+    if (SchedulerBinding.instance.schedulerPhase == SchedulerPhase.persistentCallbacks) {
+      if (_postFrameScheduled) return;
+      _postFrameScheduled = true;
+      SchedulerBinding.instance.addPostFrameCallback((_) {
+        _postFrameScheduled = false;
+        if (attached) markNeedsLayout();
+      });
+      return;
+    }
+    markNeedsLayout();
+  }
+
+  @override
+  void attach(PipelineOwner owner) {
+    super.attach(owner);
+    _solidHeight.addListener(_scheduleMarkNeedsLayout);
+  }
+
+  @override
+  void detach() {
+    _solidHeight.removeListener(_scheduleMarkNeedsLayout);
+    super.detach();
+  }
+
+  @override
+  void performLayout() {
+    size = constraints.biggest;
+    final c = child;
+    if (c == null) return;
+    final band = (_solidHeight.value + _feather).clamp(0.0, size.height);
+    c.layout(BoxConstraints.tight(Size(size.width, band)), parentUsesSize: true);
+    final data = c.parentData! as BoxParentData;
+    data.offset = Offset(0, _fromTop ? 0 : size.height - band);
+  }
+}
+
+class _CachedBandVeil extends StatefulWidget {
+  const _CachedBandVeil({required this.solidHeight, required this.painter});
+
+  final ValueListenable<double> solidHeight;
+  final _BandVeilPainter painter;
+
+  @override
+  State<_CachedBandVeil> createState() => _CachedBandVeilState();
+}
+
+class _CachedBandVeilState extends State<_CachedBandVeil> {
+  final _controller = SnapshotController(allowSnapshotting: true);
+
+  void _sync() {
+    final active = TickerMode.valuesOf(context).enabled;
+    if (_controller.allowSnapshotting != active) {
+      _controller.allowSnapshotting = active;
+      if (!active) _controller.clear();
+    }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _sync();
+  }
+
+  @override
+  void didUpdateWidget(_CachedBandVeil oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.painter.shouldRepaint(oldWidget.painter)) {
+      _controller.clear();
+    }
+    _sync();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => SnapshotWidget(
+    controller: _controller,
+    autoresize: true,
+    child: CustomPaint(painter: widget.painter),
+  );
+}
+
+class _BandVeilPainter extends CustomPainter {
+  _BandVeilPainter({
+    required this.solidHeight,
+    required this.feather,
+    required this.fromTop,
+    required this.pageHeight,
+    required this.backdrop,
+  }) : super(repaint: solidHeight);
+
+  final ValueListenable<double> solidHeight;
+  final double feather;
+  final bool fromTop;
+  final double pageHeight;
+  final _BackdropPainter backdrop;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final band = size.height;
+    if (band <= 0 || size.isEmpty) return;
+    final rect = Offset.zero & size;
+    final fade = (feather / band).clamp(0.0, 1.0);
+    const samples = 8;
+    final stops = <double>[];
+    final colors = <Color>[];
+    if (fromTop) {
+      stops.add(0);
+      colors.add(Colors.black);
+    }
+    for (var i = 0; i <= samples; i++) {
+      final t = i / samples;
+      stops.add(fromTop ? 1 - fade + fade * t : fade * t);
+      final alpha = Curves.easeInOutCubic.transform(t);
+      colors.add(Colors.black.withValues(alpha: fromTop ? 1 - alpha : alpha));
+    }
+    if (!fromTop) {
+      stops.add(1);
+      colors.add(Colors.black);
+    }
+
+    canvas.saveLayer(rect, Paint());
+    canvas.clipRect(rect);
+    final dy = fromTop ? 0.0 : -(pageHeight - band);
+    canvas.save();
+    canvas.translate(0, dy);
+    backdrop.paint(canvas, Size(size.width, pageHeight));
+    canvas.restore();
+    canvas.drawRect(
+      rect,
+      Paint()
+        ..blendMode = BlendMode.dstIn
+        ..shader = LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: colors,
+          stops: stops,
+        ).createShader(rect),
+    );
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(_BandVeilPainter old) =>
+      old.solidHeight != solidHeight ||
+      old.feather != feather ||
+      old.fromTop != fromTop ||
+      old.pageHeight != pageHeight ||
+      backdrop.shouldRepaint(old.backdrop);
 }
 
 /// A fixed height for [BackdropVeil.top].

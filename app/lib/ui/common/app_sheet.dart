@@ -171,15 +171,17 @@ class _SheetGlassState extends State<_SheetGlass> with SingleTickerProviderState
   }
 
   @override
-  Widget build(BuildContext context) => AnimatedBuilder(
-    animation: _settled,
-    builder: (context, child) => GlassSurface(
-      tier: GlassTier.sheet,
-      borderRadius: const BorderRadius.vertical(top: Radius.circular(AppShape.xl)),
-      settled: _settled.value,
-      child: child,
+  Widget build(BuildContext context) => RepaintBoundary(
+    child: AnimatedBuilder(
+      animation: _settled,
+      builder: (context, child) => GlassSurface(
+        tier: GlassTier.sheet,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(AppShape.xl)),
+        settled: _settled.value,
+        child: child,
+      ),
+      child: RepaintBoundary(child: widget.child),
     ),
-    child: widget.child,
   );
 }
 

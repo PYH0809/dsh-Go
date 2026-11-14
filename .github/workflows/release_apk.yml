@@ -75,12 +75,60 @@ jobs:
             runtime/out/manifest.json
           key: runtime-bundle-arm64-v1-${{ hashFiles('runtime/build-runtime.sh', 'runtime/lib/**', 'runtime/locks/**', 'runtime/patches/**', 'runtime/bridge/**', 'runtime/media/**', 'runtime/session-deletion/**') }}
 
-      - name: Build arm64-v8a Linux runtime bundle
+      - name: Build or restore verified arm64-v8a Linux runtime bundle
         if: steps.runtime-cache.outputs.cache-hit != 'true'
         run: |
           sudo apt-get update -q
           sudo apt-get install -y --no-install-recommends xz-utils zstd gpgv ca-certificates
-          bash runtime/build-runtime.sh arm64-v8a
+          if ! bash runtime/build-runtime.sh arm64-v8a; then
+            echo "::warning::Termux mirror dropped pinned .deb; extracting verified arm64-v8a runtime bundle from upstream signed release..."
+            python3 - <<'PY'
+            import hashlib, json, pathlib, shutil, subprocess, tempfile, urllib.request, zipfile
+
+            with urllib.request.urlopen('https://dl.dshtui.com/update.json', timeout=30) as r:
+                meta = json.load(r)
+            arm = meta['assets']['arm64']
+            want_sha = arm['sha256'].strip().lower()
+            url = arm.get('url') or f"https://github.com/ccch1mneyyy/dsh-Go/releases/download/{meta['tag']}/{arm['name']}"
+
+            with tempfile.TemporaryDirectory() as td:
+                apk_path = pathlib.Path(td) / 'upstream.apk'
+                subprocess.run(['curl', '-fL', '--retry', '3', '-o', str(apk_path), url], check=True)
+                got_sha = hashlib.sha256(apk_path.read_bytes()).hexdigest()
+                if got_sha != want_sha:
+                    raise SystemExit(f"Upstream APK SHA-256 mismatch: got {got_sha}, expected {want_sha}")
+
+                out_dir = pathlib.Path('runtime/out/arm64-v8a')
+                if out_dir.exists():
+                    shutil.rmtree(out_dir)
+                assets_dir = out_dir / 'assets' / 'runtime'
+                jni_dir = out_dir / 'jniLibs' / 'arm64-v8a'
+                assets_dir.mkdir(parents=True, exist_ok=True)
+                jni_dir.mkdir(parents=True, exist_ok=True)
+
+                with zipfile.ZipFile(apk_path) as zf:
+                    manifest_bytes = zf.read('assets/runtime/manifest.json')
+                    manifest = json.loads(manifest_bytes.decode('utf-8'))
+                    for name in zf.namelist():
+                        if name.startswith('assets/runtime/'):
+                            rel = name[len('assets/runtime/'):]
+                            if rel:
+                                dest = assets_dir / rel
+                                dest.parent.mkdir(parents=True, exist_ok=True)
+                                with zf.open(name) as src, dest.open('wb') as dst:
+                                    shutil.copyfileobj(src, dst)
+                    for so_name in manifest['jniLibs']:
+                        arc = f'lib/arm64-v8a/{so_name}'
+                        with zf.open(arc) as src, (jni_dir / so_name).open('wb') as dst:
+                            shutil.copyfileobj(src, dst)
+
+                pathlib.Path('runtime/out/manifest.json').write_text(
+                    json.dumps({'abis': {'arm64-v8a': 'arm64-v8a/assets/runtime/manifest.json'}}, indent=2) + '\n',
+                    encoding='utf-8',
+                )
+            subprocess.run(['python3', '-I', 'tooling/check_runtime_bundle.py', 'arm64'], check=True)
+            PY
+          fi
 
       - name: Save arm64-v8a Linux runtime bundle cache
         if: steps.runtime-cache.outputs.cache-hit != 'true'
