@@ -307,8 +307,6 @@ class _SheetGlassState extends State<_SheetGlass> with SingleTickerProviderState
     // `GlassSurface` / `BackdropFilter`: an ancestor RepaintBoundary creates an
     // empty offscreen layer on Impeller OpenGLES so BackdropFilter blurs nothing!
     final child = AppBackdrop.snapshotCaching ? RepaintBoundary(child: widget.child) : widget.child;
-    final sheetStyle = DshSurfaces.of(context).sheet;
-    final movingStyle = sheetStyle.shadows.isEmpty ? null : sheetStyle.copyWith(shadows: const []);
     return Listener(
       behavior: HitTestBehavior.translucent,
       onPointerDown: _onPointerDown,
@@ -322,7 +320,6 @@ class _SheetGlassState extends State<_SheetGlass> with SingleTickerProviderState
             tier: GlassTier.sheet,
             borderRadius: const BorderRadius.vertical(top: Radius.circular(AppShape.xl)),
             settled: _settled.value,
-            style: _settled.value == 0 ? movingStyle : null,
             child: child,
           ),
           child: child,

@@ -163,8 +163,6 @@ class _TodoBarState extends State<TodoBar> with SingleTickerProviderStateMixin {
     );
     final maxList = (MediaQuery.sizeOf(context).height * TodoBar.maxListShare).clamp(0.0, TodoBar.maxList);
     final current = s.current;
-    final chromeStyle = DshSurfaces.of(context).chrome;
-    final movingStyle = chromeStyle.shadows.isEmpty ? null : chromeStyle.copyWith(shadows: const []);
     final body = Material(
         type: MaterialType.transparency,
         child: Column(
@@ -211,7 +209,6 @@ class _TodoBarState extends State<TodoBar> with SingleTickerProviderStateMixin {
         borderRadius: DockMetrics.shape,
         grouped: true,
         settled: _settled.value,
-        style: _settled.value == 0 ? movingStyle : null,
         child: child,
       ),
       child: body,

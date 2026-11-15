@@ -209,9 +209,14 @@ class GlassSurface extends StatelessWidget {
       content = _clip(content);
     }
 
-    if (s.shadows.isNotEmpty && GlassBackdropScope.shadowsEnabledOf(context)) {
+    if (s.shadows.isNotEmpty) {
+      // Keep the CustomPaint wrapper mounted while shadows are suspended so
+      // toggling settled/shadowsEnabled never remounts unkeyed child State.
+      final paintShadows = settled != 0 && GlassBackdropScope.shadowsEnabledOf(context);
       content = CustomPaint(
-        painter: _GlassShadowPainter(shape: shape, shadows: s.shadows, textDirection: textDirection),
+        painter: paintShadows
+            ? _GlassShadowPainter(shape: shape, shadows: s.shadows, textDirection: textDirection)
+            : null,
         child: content,
       );
     }
