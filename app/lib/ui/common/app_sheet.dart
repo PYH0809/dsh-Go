@@ -237,6 +237,7 @@ class _SheetGlassState extends State<_SheetGlass> with SingleTickerProviderState
       });
       SchedulerBinding.instance.ensureVisualUpdate();
     });
+    SchedulerBinding.instance.ensureVisualUpdate();
   }
 
   void _onPointerDown(PointerDownEvent _) {
