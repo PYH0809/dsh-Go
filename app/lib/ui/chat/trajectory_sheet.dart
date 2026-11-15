@@ -44,7 +44,7 @@ class TrajectorySheet extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final l10n = context.l10n;
     final trace = ref.watch(chatProvider(sessionId).select((s) => s.turns.where((t) => t.turn == turn).lastOrNull));
-    final items = ref.watch(chatProvider(sessionId).select((s) => s.items));
+    final toolItems = ref.watch(chatProvider(sessionId).select((s) => _ToolItemsSnapshot.from(s.items)));
     final skew = ref.watch(chatProvider(sessionId).select((s) => s.clockSkew));
     final maxHeight = MediaQuery.sizeOf(context).height * 0.86;
     if (trace == null) {
@@ -65,70 +65,108 @@ class TrajectorySheet extends ConsumerWidget {
         ),
       );
     }
-    final tools = toolsById(items);
+    final tools = toolsById(toolItems.items);
 
     // Half height at first; drag the list up for the rest of a long turn.
     // Short turns open at their own height and stop there.
     final rows = trajectoryRows(trace).length;
     final estimate = 150.0 + rows * 52 + 150;
 
-    Widget body(Duration? elapsed) {
-      final total = trace.duration ?? elapsed ?? Duration.zero;
-      return LayoutBuilder(
-        builder: (context, constraints) {
-          final room = math.min(constraints.maxHeight, maxHeight);
-          final full = (estimate / room).clamp(0.25, 1.0);
-          final initial = math.min(full, 0.62);
-          return DraggableScrollableSheet(
-            expand: false,
-            initialChildSize: initial * room / constraints.maxHeight,
-            minChildSize: math.min(initial, 0.3) * room / constraints.maxHeight,
-            maxChildSize: full * room / constraints.maxHeight,
-            builder: (context, controller) => SafeArea(
-              top: false,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  _Header(trace: trace, total: total),
-                  _Composition(trace: trace, total: total),
-                  Expanded(
-                    child: () {
-                      final list = _FollowTail(
-                        controller: controller,
-                        follow: trace.running,
-                        child: TrajectoryList.scrollable(
-                          controller: controller,
-                          padding: const EdgeInsets.only(top: 4, bottom: 8),
-                          trace: trace,
-                          total: total,
-                          tools: tools,
-                          inset: 20,
-                          onOpen: (span) =>
-                              Navigator.of(context)
-                                  .push(StepDetailPage.route(sessionId: sessionId, turn: trace.turn, span: span)),
-                        ),
-                      );
-                      // Avoid ShaderMaskLayer offscreen saveLayer on every scroll frame on Impeller!
-                      return AppBackdrop.snapshotCaching
-                          ? ClipRect(child: RepaintBoundary(child: list))
-                          : _EdgeFade(child: list);
-                    }(),
-                  ),
-                  TraceUsageFooter(trace: trace),
-                  const SizedBox(height: 12),
-                ],
-              ),
-            ),
-          );
-        },
-      );
-    }
+    Widget headerAndComposition(Duration total) => Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _Header(trace: trace, total: total),
+        _Composition(trace: trace, total: total),
+      ],
+    );
 
-    // A running turn's bars rescale as it goes: the whole body ticks (the
-    // sheet is modal, the chat underneath does not rebuild).
-    if (!trace.running) return body(null);
-    return LiveElapsed(since: trace.start, skew: skew, builder: (context, elapsed) => body(elapsed));
+    Widget buildList(ScrollController controller, Duration total) => TrajectoryList.scrollable(
+      controller: controller,
+      padding: const EdgeInsets.only(top: 4, bottom: 8),
+      trace: trace,
+      total: total,
+      tools: tools,
+      inset: 20,
+      onOpen: (span) =>
+          Navigator.of(context).push(StepDetailPage.route(sessionId: sessionId, turn: trace.turn, span: span)),
+    );
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final room = math.min(constraints.maxHeight, maxHeight);
+        final full = (estimate / room).clamp(0.25, 1.0);
+        final initial = math.min(full, 0.62);
+        return DraggableScrollableSheet(
+          expand: false,
+          initialChildSize: initial * room / constraints.maxHeight,
+          minChildSize: math.min(initial, 0.3) * room / constraints.maxHeight,
+          maxChildSize: full * room / constraints.maxHeight,
+          builder: (context, controller) => SafeArea(
+            top: false,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (!trace.running)
+                  headerAndComposition(trace.duration ?? Duration.zero)
+                else
+                  LiveElapsed(
+                    since: trace.start,
+                    skew: skew,
+                    builder: (context, elapsed) =>
+                        headerAndComposition(trace.duration ?? elapsed ?? Duration.zero),
+                  ),
+                Expanded(
+                  child: () {
+                    final list = _FollowTail(
+                      controller: controller,
+                      follow: trace.running,
+                      child: !trace.running
+                          ? buildList(controller, trace.duration ?? Duration.zero)
+                          : LiveElapsed(
+                              since: trace.start,
+                              skew: skew,
+                              builder: (context, elapsed) =>
+                                  buildList(controller, trace.duration ?? elapsed ?? Duration.zero),
+                            ),
+                    );
+                    // Avoid ShaderMaskLayer offscreen saveLayer on every scroll frame on Impeller!
+                    return AppBackdrop.snapshotCaching
+                        ? ClipRect(child: RepaintBoundary(child: list))
+                        : _EdgeFade(child: list);
+                  }(),
+                ),
+                TraceUsageFooter(trace: trace),
+                const SizedBox(height: 12),
+              ],
+            ),
+          ),
+        );
+      },
+    );
   }
+}
+
+class _ToolItemsSnapshot {
+  const _ToolItemsSnapshot(this.items);
+
+  factory _ToolItemsSnapshot.from(List<ChatItem> all) =>
+      _ToolItemsSnapshot([for (final item in all) if (item is ToolChatItem) item]);
+
+  final List<ToolChatItem> items;
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    if (other is! _ToolItemsSnapshot || other.items.length != items.length) return false;
+    for (var i = 0; i < items.length; i++) {
+      if (!identical(items[i], other.items[i])) return false;
+    }
+    return true;
+  }
+
+  @override
+  int get hashCode => items.length;
 }
 
 /// 进行中的一轮:打开时停在最新的一步,之后贴底跟随;往上翻就不再打扰

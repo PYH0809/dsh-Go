@@ -17,6 +17,7 @@ class GlassBackdropScope extends InheritedWidget {
     super.key,
     required this.enabled,
     this.animationsEnabled,
+    this.shadowsEnabled = true,
     required super.child,
   });
 
@@ -26,6 +27,11 @@ class GlassBackdropScope extends InheritedWidget {
   /// `PetSprite`, `LiveElapsed`) should run inside this scope. Defaults to
   /// [enabled].
   final bool? animationsEnabled;
+
+  /// Whether [GlassSurface] descendants paint their outer [BoxShadow]s.
+  /// Suspended during dock deck fold/turn animations so moving cards avoid
+  /// per-frame `evenOdd` path clipping and `MaskFilter.blur`.
+  final bool shadowsEnabled;
 
   static bool enabledOf(BuildContext context) =>
       context.dependOnInheritedWidgetOfExactType<GlassBackdropScope>()?.enabled ?? true;
@@ -37,9 +43,14 @@ class GlassBackdropScope extends InheritedWidget {
     return scope.animationsEnabled ?? scope.enabled;
   }
 
+  static bool shadowsEnabledOf(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<GlassBackdropScope>()?.shadowsEnabled ?? true;
+
   @override
   bool updateShouldNotify(GlassBackdropScope oldWidget) =>
-      enabled != oldWidget.enabled || animationsEnabled != oldWidget.animationsEnabled;
+      enabled != oldWidget.enabled ||
+      animationsEnabled != oldWidget.animationsEnabled ||
+      shadowsEnabled != oldWidget.shadowsEnabled;
 }
 
 /// 玻璃表面:**模糊背后的内容 → 叠半透明填充 → 发丝描边 + 顶边高光 → 外投影**。
@@ -199,8 +210,13 @@ class GlassSurface extends StatelessWidget {
     }
 
     if (s.shadows.isNotEmpty) {
+      // Keep the CustomPaint wrapper mounted while shadows are suspended so
+      // toggling settled/shadowsEnabled never remounts unkeyed child State.
+      final paintShadows = settled != 0 && GlassBackdropScope.shadowsEnabledOf(context);
       content = CustomPaint(
-        painter: _GlassShadowPainter(shape: shape, shadows: s.shadows, textDirection: textDirection),
+        painter: paintShadows
+            ? _GlassShadowPainter(shape: shape, shadows: s.shadows, textDirection: textDirection)
+            : null,
         child: content,
       );
     }

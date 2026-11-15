@@ -193,6 +193,7 @@ class _SheetGlassState extends State<_SheetGlass> with SingleTickerProviderState
   double? _lastExtent;
   bool _extentMoving = false;
   int _extentTicket = 0;
+  int _pointerDownCount = 0;
 
   @override
   void didChangeDependencies() {
@@ -222,29 +223,50 @@ class _SheetGlassState extends State<_SheetGlass> with SingleTickerProviderState
     _sync();
   }
 
+  void _scheduleExtentIdle() {
+    if (_pointerDownCount > 0) return;
+    final ticket = ++_extentTicket;
+    SchedulerBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _pointerDownCount > 0 || ticket != _extentTicket) return;
+      // Wait one subsequent frame without a new notification so idle frames
+      // clear `_extentMoving` while active 60/120Hz drags or flings keep it true!
+      SchedulerBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || _pointerDownCount > 0 || ticket != _extentTicket) return;
+        _extentMoving = false;
+        _sync();
+      });
+      SchedulerBinding.instance.ensureVisualUpdate();
+    });
+    SchedulerBinding.instance.ensureVisualUpdate();
+  }
+
+  void _onPointerDown(PointerDownEvent _) {
+    _pointerDownCount++;
+  }
+
+  void _onPointerUpOrCancel(PointerEvent _) {
+    if (_pointerDownCount > 0) _pointerDownCount--;
+    if (_pointerDownCount == 0 && _extentMoving) _scheduleExtentIdle();
+  }
+
   bool _onExtent(DraggableScrollableNotification notification) {
     final extent = notification.extent;
     final previous = _lastExtent ?? notification.initialExtent;
     _lastExtent = extent;
     if ((previous - extent).abs() > 1e-4) {
       _extentMoving = true;
+      ++_extentTicket;
       final phase = SchedulerBinding.instance.schedulerPhase;
       final safeSync =
           phase != SchedulerPhase.persistentCallbacks && phase != SchedulerPhase.midFrameMicrotasks;
-      if (safeSync) _sync();
-      final ticket = ++_extentTicket;
-      SchedulerBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
-        if (!safeSync && _extentMoving) _sync();
-        // Wait one subsequent frame without a new notification so idle frames
-        // clear `_extentMoving` while active 60/120Hz drags keep it true!
+      if (safeSync) {
+        _sync();
+      } else {
         SchedulerBinding.instance.addPostFrameCallback((_) {
-          if (!mounted || ticket != _extentTicket) return;
-          _extentMoving = false;
-          _sync();
+          if (mounted && _extentMoving) _sync();
         });
-        SchedulerBinding.instance.ensureVisualUpdate();
-      });
+      }
+      _scheduleExtentIdle();
     }
     // Bubble up so Material's `BottomSheet.extentChanged` still receives it!
     return false;
@@ -285,17 +307,23 @@ class _SheetGlassState extends State<_SheetGlass> with SingleTickerProviderState
     // `GlassSurface` / `BackdropFilter`: an ancestor RepaintBoundary creates an
     // empty offscreen layer on Impeller OpenGLES so BackdropFilter blurs nothing!
     final child = AppBackdrop.snapshotCaching ? RepaintBoundary(child: widget.child) : widget.child;
-    return NotificationListener<DraggableScrollableNotification>(
-      onNotification: _onExtent,
-      child: AnimatedBuilder(
-        animation: _settled,
-        builder: (context, child) => GlassSurface(
-          tier: GlassTier.sheet,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(AppShape.xl)),
-          settled: _settled.value,
+    return Listener(
+      behavior: HitTestBehavior.translucent,
+      onPointerDown: _onPointerDown,
+      onPointerUp: _onPointerUpOrCancel,
+      onPointerCancel: _onPointerUpOrCancel,
+      child: NotificationListener<DraggableScrollableNotification>(
+        onNotification: _onExtent,
+        child: AnimatedBuilder(
+          animation: _settled,
+          builder: (context, child) => GlassSurface(
+            tier: GlassTier.sheet,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(AppShape.xl)),
+            settled: _settled.value,
+            child: child,
+          ),
           child: child,
         ),
-        child: child,
       ),
     );
   }
