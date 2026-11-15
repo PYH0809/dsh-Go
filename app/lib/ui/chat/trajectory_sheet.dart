@@ -552,9 +552,10 @@ class _TrajectoryListState extends State<TrajectoryList> {
     }
     final total = widget.total.inMilliseconds <= 0 ? const Duration(milliseconds: 1) : widget.total;
     final now = trace.start.add(widget.total);
-    // Scrollable trajectory lists always virtualize via ListView.builder so
-    // resizing DraggableScrollableSheet only lays out visible viewport rows.
-    if (widget.controller != null) {
+    // Short turns (<= 16 rows) build a single Column; longer turns virtualize
+    // with ListView.builder so 80+ step traces stay O(viewport) regardless of
+    // rendering cache flags!
+    if (widget.controller != null && rows.length > 16) {
       return ListView.builder(
         controller: widget.controller,
         padding: widget.padding,
@@ -563,11 +564,13 @@ class _TrajectoryListState extends State<TrajectoryList> {
         itemBuilder: (context, index) => _buildRow(rows[index], trace, total, now),
       );
     }
-    return Column(
+    final column = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
       children: [for (final row in rows) _buildRow(row, trace, total, now)],
     );
+    if (widget.controller == null) return column;
+    return SingleChildScrollView(controller: widget.controller, padding: widget.padding, child: column);
   }
 }
 
