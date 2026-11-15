@@ -1480,12 +1480,15 @@ class RemoteAccount {
         promoteTransport: upgrader == null ? null : ({bool preferLan = false}) => upgrader!.promote(preferLan: preferLan),
       );
       if (upgrader != null) {
-        // Let the initial follow snapshot start over Relay first, then climb
-        // to TURN -> P2P -> LAN in the background without blocking startup.
+        // Start WebRTC direct upgrade immediately over the authenticated channel
+        // and give fast routes a short bounded head start (450ms on Wi-Fi/LAN,
+        // 250ms on cellular) so LAN/fast-P2P carry initial history with near-zero
+        // Relay traffic while slow cellular still falls back to Relay quickly.
         final expectLan = (_networkHints[host.id] ?? '').contains('lan');
-        Timer(const Duration(milliseconds: 400), () {
-          if (!hostSession.isClosed) unawaited(upgrader!.promote(preferLan: expectLan));
-        });
+        final initialWindow = expectLan
+            ? const Duration(milliseconds: 450)
+            : const Duration(milliseconds: 250);
+        await upgrader.waitForInitialWindow(initialWindow, preferLan: expectLan);
       }
       return hostSession;
     } on RemoteRpcException catch (error) {

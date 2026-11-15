@@ -209,6 +209,31 @@ class LiveTransportUpgrader {
     return _running ??= _runAttempt(preferLan: preferLan).whenComplete(() => _running = null);
   }
 
+  /// Starts (or joins) a background transport upgrade and waits up to [window]
+  /// for direct activation before letting initial history reads fall back to
+  /// the already-authenticated Relay channel.
+  Future<bool> waitForInitialWindow(Duration window, {bool preferLan = false}) async {
+    if (currentMode != RemoteTransportMode.relay) return true;
+    final inFlight = _running ?? promote(preferLan: preferLan);
+    if (window <= Duration.zero) return false;
+    final completer = Completer<bool>();
+    final timer = Timer(window, () {
+      if (!completer.isCompleted) completer.complete(false);
+    });
+    unawaited(
+      inFlight.then((ok) {
+        if (!completer.isCompleted) completer.complete(ok);
+      }, onError: (Object _) {
+        if (!completer.isCompleted) completer.complete(false);
+      }),
+    );
+    try {
+      return await completer.future;
+    } finally {
+      timer.cancel();
+    }
+  }
+
   void _onEvent(RemoteEvent event) {
     if (_closed || event.event != 'remote.transport.upgrade.ice') return;
     final data = asMap(event.data);
@@ -354,7 +379,11 @@ class LiveTransportUpgrader {
       final activation = asMap(
         await rpc.call(
           'remote.transport.upgrade.activate',
-          {'attemptId': attemptId, 'transport': candidateMode.name},
+          {
+            'attemptId': attemptId,
+            'transport': candidateMode.name,
+            'previousLegEndCounter': channel.outboundCounter,
+          },
           timeout: const Duration(seconds: 6),
         ),
       );
@@ -362,7 +391,21 @@ class LiveTransportUpgrader {
         await upgraded.close();
         return false;
       }
-      await channel.switchOutboundTransport(upgraded, closePrevious: true);
+      final hostModeRaw = activation?['mode'];
+      if (hostModeRaw case 'LAN' || 'P2P' || 'TURN') {
+        upgraded._mode = switch (hostModeRaw) {
+          'LAN' => RemoteTransportMode.lan,
+          'TURN' => RemoteTransportMode.turn,
+          _ => RemoteTransportMode.p2p,
+        };
+      }
+      final hostEndRaw = activation?['previousLegEndCounter'];
+      final hostEndCounter = hostEndRaw is int ? hostEndRaw : null;
+      await channel.switchOutboundTransport(
+        upgraded,
+        closePrevious: true,
+        previousLegEndCounter: hostEndCounter,
+      );
       _currentRtc = upgraded;
       onUpgraded(upgraded);
       return true;

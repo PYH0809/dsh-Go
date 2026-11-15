@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:dsh_remote/dsh_remote.dart';
 import 'package:test/test.dart';
 
@@ -36,8 +38,33 @@ void main() {
     await server.close();
   });
 
-  test('connects immediately over Relay, climbs to P2P, and climbs further to LAN without dropping live streams', () async {
-    // Initially cellular: P2P pair only.
+  test('fast direct path upgrades within initial window so initial stream opens directly on P2P/LAN', () async {
+    rtc.stats = pairStats('host', '192.168.1.20', 'host', '192.168.1.30');
+    late FakeHostStream liveStream;
+    host.onOpen = (s) {
+      liveStream = s;
+      s.push('direct-first-screen');
+    };
+
+    final target = (await account.listHosts()).single;
+    final client = await account.connectHost(target);
+    final session = client.remoteCarrier!.session!;
+    expect(session.transport, 'lan', reason: 'fast LAN upgrades inside the 450ms initial window before first-screen reads');
+
+    final items = <Object?>[];
+    final sub = client.mux.open('session/follow', const {}).items.listen(items.add);
+    await Future<void>.delayed(const Duration(milliseconds: 30));
+    expect(items, ['direct-first-screen']);
+    liveStream.push('live-delta');
+    await Future<void>.delayed(const Duration(milliseconds: 30));
+    expect(items, ['direct-first-screen', 'live-delta']);
+    expect(host.handshakes, hasLength(1));
+    await sub.cancel();
+  });
+
+  test('slow cellular hole punch falls back to Relay after 250ms window, then climbs to P2P and LAN without dropping live streams', () async {
+    final slowHolePunch = Completer<void>();
+    rtc.offerGate = slowHolePunch.future;
     rtc.stats = pairStats('srflx', '203.0.113.7', 'srflx', '198.51.100.9');
     final seenTransports = <String?>[];
     late FakeHostStream liveStream;
@@ -46,6 +73,11 @@ void main() {
       s.push('from-relay');
     };
 
+    account.preferredTransports = () async => const [
+      RemoteTransportMode.p2p,
+      RemoteTransportMode.turn,
+      RemoteTransportMode.relay,
+    ];
     final target = (await account.listHosts()).single;
     final client = await account.connectHost(
       target,
@@ -55,15 +87,17 @@ void main() {
     );
 
     final session = client.remoteCarrier!.session!;
-    expect(session.transport, 'relay', reason: 'starts immediately on Relay with zero WebRTC wait');
+    expect(session.transport, 'relay', reason: 'falls back to Relay once the 250ms cellular window expires');
 
     final items = <Object?>[];
     final sub = client.mux.open('session/follow', const {}).items.listen(items.add);
     await Future<void>.delayed(const Duration(milliseconds: 30));
     expect(items, ['from-relay']);
 
-    // Background 400ms timer promotes Relay -> P2P seamlessly.
-    await Future<void>.delayed(const Duration(milliseconds: 700));
+    // Hole punch completes in the background -> promotes Relay -> P2P seamlessly!
+    rtc.offerGate = null;
+    slowHolePunch.complete();
+    await Future<void>.delayed(const Duration(milliseconds: 120));
     expect(session.transport, 'p2p');
     expect(seenTransports, containsAllInOrder(['relay', 'p2p']));
     liveStream.push('from-p2p');
@@ -77,10 +111,9 @@ void main() {
     expect(session.transport, 'lan');
     await Future<void>.delayed(Duration.zero);
     expect(seenTransports, containsAllInOrder(['relay', 'p2p', 'lan']));
-    expect(rtc.clients.first.closed, isFalse, reason: 'superseded P2P leg stays open briefly to drain trailing inbound frames');
+    expect(rtc.clients.first.closed, isFalse, reason: 'superseded P2P leg stays open until trailing watermark drains');
     expect(rtc.clients.last.closed, isFalse, reason: 'new LAN leg is active');
 
-    // Same Noise session & same open stream continue over LAN without interruption!
     liveStream.push('from-lan');
     await Future<void>.delayed(const Duration(milliseconds: 30));
     expect(items, ['from-relay', 'from-p2p', 'from-lan']);
