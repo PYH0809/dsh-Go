@@ -2,8 +2,11 @@
 // slim bar while the session has a todo list, expanding in place into the
 // whole checklist.
 
+import 'dart:async';
+
 import 'package:dsh_client/dsh_client.dart';
 import 'package:flutter/foundation.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -81,12 +84,20 @@ class TodoBar extends StatefulWidget {
   State<TodoBar> createState() => _TodoBarState();
 }
 
-class _TodoBarState extends State<TodoBar> {
+class _TodoBarState extends State<TodoBar> with SingleTickerProviderStateMixin {
   late final _open = ValueNotifier<bool>(widget.initiallyOpen);
+  late final AnimationController _settled = AnimationController(
+    vsync: this,
+    value: 1,
+    duration: AppMotion.glassIn,
+  );
+  Timer? _expandTimer;
   final _currentRow = GlobalKey();
 
   @override
   void dispose() {
+    _expandTimer?.cancel();
+    _settled.dispose();
     _open.dispose();
     super.dispose();
   }
@@ -95,6 +106,15 @@ class _TodoBarState extends State<TodoBar> {
     HapticFeedback.selectionClick();
     final next = !_open.value;
     _open.value = next;
+    _expandTimer?.cancel();
+    final duration = AppMotion.of(context, AppMotion.standard);
+    if (duration > Duration.zero) {
+      _settled.reset();
+      _expandTimer = Timer(duration, () {
+        if (!mounted) return;
+        unawaited(_settled.forward());
+      });
+    }
     if (next) {
       // Bring the item being worked on into view once the list is laid out.
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -143,11 +163,9 @@ class _TodoBarState extends State<TodoBar> {
     );
     final maxList = (MediaQuery.sizeOf(context).height * TodoBar.maxListShare).clamp(0.0, TodoBar.maxList);
     final current = s.current;
-    return GlassSurface(
-      tier: GlassTier.chrome,
-      borderRadius: DockMetrics.shape,
-      grouped: true,
-      child: Material(
+    final chromeStyle = DshSurfaces.of(context).chrome;
+    final movingStyle = chromeStyle.shadows.isEmpty ? null : chromeStyle.copyWith(shadows: const []);
+    final body = Material(
         type: MaterialType.transparency,
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -185,7 +203,18 @@ class _TodoBarState extends State<TodoBar> {
             ),
           ],
         ),
+      );
+    return AnimatedBuilder(
+      animation: _settled,
+      builder: (context, child) => GlassSurface(
+        tier: GlassTier.chrome,
+        borderRadius: DockMetrics.shape,
+        grouped: true,
+        settled: _settled.value,
+        style: _settled.value == 0 ? movingStyle : null,
+        child: child,
       ),
+      child: body,
     );
   }
 }

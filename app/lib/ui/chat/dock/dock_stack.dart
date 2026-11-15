@@ -205,6 +205,7 @@ class _DockStackState extends ConsumerState<DockStack> with TickerProviderStateM
         return GlassBackdropScope(
           enabled: parentSampling && !moving,
           animationsEnabled: parentAnimations,
+          shadowsEnabled: !moving,
           child: _DockStackLayout(
             spread: _curve.value,
             turn: _turn.value,
