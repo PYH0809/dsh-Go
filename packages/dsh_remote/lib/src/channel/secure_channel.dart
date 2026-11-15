@@ -155,11 +155,53 @@ class SecureChannel {
     }
   }
 
+  static const int maxReorderBufferedFrames = 256;
+  static const int maxReorderBufferedBytes = 4 * 1024 * 1024;
+  static const Duration reorderGapTimeout = Duration(seconds: 5);
+
   /// Buffers out-of-order frames across an in-band transport upgrade (e.g. a
   /// fast DataChannel frame arriving before the last trailing Relay frame).
   final Map<int, Uint8List> _futureCounterFrames = {};
+  int _futureBufferedBytes = 0;
+  Timer? _reorderGapTimer;
+  int? _reorderGapCounter;
+
+  int get outboundCounter => _noise.sendingCounter;
+
+  void _armReorderGapTimer() {
+    if (_futureCounterFrames.isEmpty) {
+      _reorderGapTimer?.cancel();
+      _reorderGapTimer = null;
+      _reorderGapCounter = null;
+      return;
+    }
+    final expected = _noise.receivingCounter;
+    if (_reorderGapCounter == expected && _reorderGapTimer != null) return;
+    _reorderGapTimer?.cancel();
+    _reorderGapCounter = expected;
+    _reorderGapTimer = Timer(reorderGapTimeout, () {
+      _reorderGapTimer = null;
+      if (!_closed && _futureCounterFrames.isNotEmpty) {
+        _fail(SecureChannelClosed('SECURE_CHANNEL_FAILED', 'Reorder gap timed out waiting for frame $expected.'));
+      }
+    });
+  }
+
+  void _checkDrainingTransports() {
+    if (_drainingTransports.isEmpty) return;
+    final received = _noise.receivingCounter;
+    for (final entry in _drainingTransports.entries.toList()) {
+      final endCounter = entry.value.endCounter;
+      if (endCounter != null && received >= endCounter) {
+        entry.value.timer.cancel();
+        _drainingTransports.remove(entry.key);
+        unawaited(entry.key.close());
+      }
+    }
+  }
 
   void _deliverPlaintext(Uint8List plaintext) {
+    _checkDrainingTransports();
     final message = _incoming.decode(plaintext);
     if (message == null) return;
     final handler = _onMessage;
@@ -174,8 +216,10 @@ class SecureChannel {
     while (!_closed) {
       final exact = _futureCounterFrames.remove(_noise.receivingCounter);
       if (exact == null) break;
+      _futureBufferedBytes -= exact.length;
       _deliverPlaintext(_noise.decrypt(exact));
     }
+    _armReorderGapTimer();
   }
 
   void _onData(Uint8List ciphertext, int? counter) {
@@ -189,11 +233,16 @@ class SecureChannel {
           throw const ProtocolError('Relay counter is duplicated or out of order.');
         }
         if (counter > _noise.receivingCounter) {
-          if (_acceptingUpgrade && _futureCounterFrames.length < 256) {
-            _futureCounterFrames[counter] = ciphertext;
-            return;
+          if (!_acceptingUpgrade ||
+              _futureCounterFrames.containsKey(counter) ||
+              _futureCounterFrames.length >= maxReorderBufferedFrames ||
+              _futureBufferedBytes + ciphertext.length > maxReorderBufferedBytes) {
+            throw const ProtocolError('Relay counter is duplicated or out of order.');
           }
-          throw const ProtocolError('Relay counter is duplicated or out of order.');
+          _futureCounterFrames[counter] = ciphertext;
+          _futureBufferedBytes += ciphertext.length;
+          _armReorderGapTimer();
+          return;
         }
         _deliverPlaintext(_noise.decrypt(ciphertext));
         _drainReorderBuffers();
@@ -226,15 +275,16 @@ class SecureChannel {
     );
   }
 
-  final Set<SecureHandshakeTransport> _drainingTransports = {};
+  final Map<SecureHandshakeTransport, ({int? endCounter, Timer timer})> _drainingTransports = {};
 
   /// Switches outbound encrypted frames to [next], draining any superseded
-  /// intermediate leg briefly so trailing inbound frames finish arriving
-  /// before teardown while keeping [_controlTransport] alive.
+  /// intermediate leg until [previousLegEndCounter] is reached (bounded by
+  /// [previousDrain]) while keeping [_controlTransport] alive.
   Future<void> switchOutboundTransport(
     SecureHandshakeTransport next, {
     bool closePrevious = false,
-    Duration previousDrain = const Duration(milliseconds: 1500),
+    int? previousLegEndCounter,
+    Duration previousDrain = const Duration(milliseconds: 3000),
   }) async {
     if (_closed) {
       await next.close();
@@ -243,13 +293,14 @@ class SecureChannel {
     final prev = _transport;
     _transport = next;
     if (closePrevious && !identical(prev, next) && !identical(prev, _controlTransport)) {
-      if (previousDrain <= Duration.zero) {
+      final alreadyDrained = previousLegEndCounter != null && _noise.receivingCounter >= previousLegEndCounter;
+      if (alreadyDrained || previousDrain <= Duration.zero) {
         unawaited(prev.close());
       } else {
-        _drainingTransports.add(prev);
-        Timer(previousDrain, () {
-          if (_drainingTransports.remove(prev)) unawaited(prev.close());
+        final timer = Timer(previousDrain, () {
+          if (_drainingTransports.remove(prev) != null) unawaited(prev.close());
         });
+        _drainingTransports[prev] = (endCounter: previousLegEndCounter, timer: timer);
       }
     }
   }
@@ -306,11 +357,17 @@ class SecureChannel {
     if (_closed) return;
     _closed = true;
     _closedReason = reason;
+    _reorderGapTimer?.cancel();
+    _reorderGapTimer = null;
+    _reorderGapCounter = null;
+    _futureCounterFrames.clear();
+    _futureBufferedBytes = 0;
     _noise.destroy();
     _incoming.reset();
     _outgoing.reset();
-    for (final stale in _drainingTransports.toList()) {
-      unawaited(stale.close());
+    for (final entry in _drainingTransports.entries.toList()) {
+      entry.value.timer.cancel();
+      unawaited(entry.key.close());
     }
     _drainingTransports.clear();
     unawaited(_transport.close());
